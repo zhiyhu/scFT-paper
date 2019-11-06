@@ -1,0 +1,1109 @@
+---
+title: "Secretory clustering for manuscript"
+author: "Zhiyuan Hu"
+date: "01/11/2019"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(SingleCellExperiment) #1.4.1
+library(scater)#1.10.1
+library(edgeR) #3.24.3
+library(limma) #3.38.3
+library(dplyr) #0.7.8
+library(scales)
+library(reshape2)
+```
+
+
+## Summary
+
+This markdown file is doing clincluster on secretory cells, generating the clusters and finally plot the heatmap.
+
+## Read data
+
+First we read in the processed dataset.
+
+```{r read data}
+# load("../RData/20180725_allFT_Clincluster_12clusters.RData")
+# saveRDS(sceset, "../rds/20190214_allFT_Clincluster_12clusters_sceset_withUMAP.rds", compress = T)
+sceset <- readRDS("../rds/20190214_allFT_Clincluster_12clusters_sceset_withUMAP.rds")
+# write.csv(as.data.frame(sceset@colData), "../GEO/sceset_colData.csv")
+# write.table(counts(sceset), "../GEO/sceset_counts.txt", quote = F, sep = "\t")
+dim(sceset)
+```
+
+```{r}
+plotTSNE(sceset, colour_by = "final.clusters")
+```
+
+#### UMAP all
+
+```{r}
+# UMAP
+# too very long time to run
+# set.seed(1234)
+# sceset <- runUMAP(sceset, ncomponents = 2, feature_set = rowData(sceset)$high.var == T,
+#   exprs_values = "logcounts", scale_features = TRUE)
+# saveRDS(sceset, "../rds/20190214_allFT_Clincluster_12clusters_sceset_withUMAP.rds", compress = T)
+# plotUMAP(sceset, colour_by = "Patient2") + xlab("UMAP_1") + ylab("UMAP_2")
+plotUMAP(sceset, colour_by = "final.clusters") + xlab("UMAP_1") + ylab("UMAP_2")
+# ggsave("../manuscript_plots/Figure1_UMAP_allCells.png", dpi = 300, width = 19, height = 15, units = "cm")
+```
+
+#### UMAP fresh
+
+```{r}
+p1 <- plotUMAP(sceset[,sceset$source == "Fresh"], colour_by = "Patient") + xlab("UMAP_1") + ylab("UMAP_2")
+p2 <- plotUMAP(sceset[,sceset$source == "Fresh"], colour_by = "EPCAM") + xlab("UMAP_1") + ylab("UMAP_2")
+p3 <- plotUMAP(sceset[,sceset$source == "Fresh"], colour_by = "KRT7") + xlab("UMAP_1") + ylab("UMAP_2")
+cowplot::plot_grid(p1,p2, p3, ncol = 3)
+# ggsave("plots/Fig1_UMAP_EPCAMandKRT7_fresh_20190510.png", width = 11, height = 2.6)
+```
+
+## Intermediate cell type
+
+```{r}
+p1 <- plotPCA(sceset[,sceset$source == "Fresh" & sceset$Patient != "15066L"], colour_by = "KRT7") + xlab("PC1") + ylab("PC2")
+p2 <- plotPCA(sceset[,sceset$source == "Fresh" & sceset$Patient != "15066L"], colour_by = "PAX8") + xlab("PC1") + ylab("PC2")
+p3 <- plotPCA(sceset[,sceset$source == "Fresh" & sceset$Patient != "15066L"], colour_by = "CCDC17") + xlab("PC1") + ylab("PC2")
+p4 <- plotPCA(sceset[,sceset$source == "Fresh" & sceset$Patient != "15066L"], colour_by = "CAPS") + xlab("PC1") + ylab("PC2")
+cowplot::plot_grid(p1,p2,p3,p4)
+# ggsave("plots/SuppFig2_intermediate_PCAs.png")
+```
+
+```{r}
+plotExpression(sceset[,sceset$final.clusters %in% c(5,11)], features = c("KRT7","PAX8","CCDC17","CAPS","EPCAM", ""), x = "source")
+```
+
+## Filtering 
+
+```{r}
+## select the fresh secretory cells
+secretory <- sceset[,sceset$final.clusters %in% c(8,9,10) & sceset$source == "Fresh" & sceset$Patient != "15066L"] # dim(secretory)
+# [1] 22110  1747
+secretory <- secretory[   ,logcounts(secretory)["KRT7",] > 2 & 
+                           logcounts(secretory)["EPCAM",] > 2 & 
+                           logcounts(secretory)["PTPRC",] == 0 &
+                           logcounts(secretory)["CCDC17",] < 1 ]
+dim(secretory)
+# [1] 22110  1410
+```
+
+
+## Markers of ciliated/secretory
+
+```{r}
+# ciliated  <- sceset[,sceset$final.clusters %in% c(11) & sceset$source == "Fresh" & sceset$Patient != "15066L"]
+# ciliated <- ciliated[   ,logcounts(ciliated)["KRT7",] <= 2 & 
+#                          logcounts(ciliated)["EPCAM",] > 2 & 
+#                          logcounts(ciliated)["PTPRC",] == 0 &
+#                          logcounts(ciliated)["CCDC17",] >= 1 ]
+# dim(ciliated)
+# matrix <- expm1(cbind(logcounts(secretory), logcounts(ciliated)))
+# keep <- rowSums(matrix > 1) > 5
+# sum(keep)
+# 
+# dge <- edgeR::DGEList(counts = matrix[keep,]) # make a edgeR object
+# rm(matrix,keep)
+# group <- c(rep("SC",1410), rep("CC", 91))
+# patient <- c(secretory$Patient2, ciliated$Patient2)
+# design <- model.matrix(~ 0+group + patient)  
+# v <- voom(dge, design, plot = TRUE)
+# fit <- lmFit(v, design) 
+# 
+# cont.matrix <- makeContrasts(contrasts = "groupSC-groupCC",levels=colnames(design))
+# fit <- contrasts.fit(fit, cont.matrix) 
+# fit <- eBayes(fit) 
+# 
+# rls <- topTable(fit, n = Inf, coef = 1, sort = "logFC", lfc = 1, p = 0.05 )
+# rls$gene <- rownames(rls)
+# 
+# write.csv(rls, "../tables/TableS4_markers_secretory_ciliated20190214.csv", row.names = F)
+```
+
+## Preprocess data
+
+#### Scale and centred data
+
+```{r}
+source("clincluster/clincluster_functions.R")
+secretory <- PrepareData(secretory, col.for.cluster = "Patient2", do.scale = T)
+```
+
+#### High variable genes
+
+```{r}
+secretory <- HighVarGenes(secretory)
+table(rowData(secretory)$high.var)
+# FALSE  TRUE 
+# 19721  2389 
+```
+
+The high variance genes
+
+```{r}
+ggplot(data = data.frame(gene.mean = rowData(secretory)$gene.mean,
+                         gene.dispersion = rowData(secretory)$gene.dispersion,
+                         high.var = rowData(secretory)$high.var), 
+       aes(x = gene.mean, y = gene.dispersion, col = high.var) ) +
+      geom_point(alpha=0.4) 
+```
+
+#### Run tSNE by the log-transformed data
+
+```{r}
+set.seed(1234)
+secretory <- runTSNE(object = secretory, ncomponents = 2, 
+                     feature_set = rownames(secretory)[rowData(secretory)$high.var],
+                     exprs_values = "logcounts", 
+                     perplexity = min(50, floor(ncol(secretory)/5)))
+```
+
+```{r}
+plotTSNE(secretory)
+```
+
+he tSNE from log-transformed data is better then the centred data.
+
+#### Calculate first 20 PCs
+
+Calculate 20 PCs from high variance genes and the log-transformed counts.
+
+```{r}
+set.seed(12345)
+secretory <- runPCA(object = secretory, ncomponents = 20, 
+                    exprs_values = "logcounts", rand_seed = 12345,
+                    feature_set = rownames(secretory)[rowData(secretory)$high.var == TRUE])
+```
+
+```{r}
+plotPCA(secretory)
+```
+
+
+Plot the variance by PCs.
+
+```{r}
+plot(1:50, (attr(secretory@reducedDims$PCA, "percentVar")[1:50])*100, pch = 20, xlab = "PC", ylab = "Standard Deviation of PC")
+```
+
+## Initial clustering
+
+specClust alllows to estimate several popular spectral clustering algorithms, for an overview see von Luxburg (2007).
+
+The Laplacian is constructed from a from nearest neighbors and there are several kernels available. The eigenvalues and eigenvectors are computed using the binding in igraph to arpack. This should ensure that this algorithm is also feasable for larger datasets as the the the distances used have dimension n\*m, where n is the number of observations and m the number of nearest neighbors. The Laplacian is sparse and has roughly n\*m elements and only k eigenvectors are computed, where k is the number of centers.
+
+```{r}
+set.seed(123456)
+secretory <- InitialCluster(secretory, k = c(4,6,6,6,6), ncomponents = 1:12, n.neighbor = 7, spec.method = "kknn")
+```
+
+```{r}
+plotTSNE(secretory, colour_by = "Patient2")
+```
+
+```{r}
+plotTSNE(secretory, colour_by = "initial.cluster")
+```
+
+```{r}
+table(secretory$initial.cluster)
+```
+
+
+## Which clustering is better?
+
+#### Visualisation of initial clusters
+
+```{r, fig.height=7, fig.width=16}
+p1 <- plotTSNE(secretory[,secretory$Patient2 == 11543], colour_by = "initial.cluster")
+p2 <- plotTSNE(secretory[,secretory$Patient2 == 11545], colour_by = "initial.cluster")
+p3 <- plotTSNE(secretory[,secretory$Patient2 == 11553], colour_by = "initial.cluster")
+p4 <- plotTSNE(secretory[,secretory$Patient2 == 15066], colour_by = "initial.cluster")
+p5 <- plotTSNE(secretory[,secretory$Patient2 == 15072], colour_by = "initial.cluster")
+cowplot::plot_grid(p1,p2,p3,p4,p5,nrow = 2)
+```
+
+
+
+## Limma
+
+#### Remove low expressed genes
+
+```{r}
+matrix <- expm1(logcounts(secretory))
+keep <- rowSums(matrix > 1) > 5
+sum(keep)
+# 15508
+```
+
+```{r}
+dge <- edgeR::DGEList(counts = matrix[keep,]) # make a edgeR object
+rm(matrix,keep)
+secretory@colData$Patient2 <- as.factor(secretory@colData$Patient2)
+design <- model.matrix(~  0 + initial.cluster, data = secretory@colData)  # Use 0 because we do not need intercept for this linear model
+design2 <- model.matrix(~  0 + Patient2, data = secretory@colData)  
+colnames(design)
+```
+
+## Incoporate patients into contrast matrix
+
+```{r}
+# Transform count data to log2-counts per million (logCPM), estimate the mean-variance relationship and use this to compute appropriate observation-level weights. The data are then ready for linear modelling.
+v <- voom(dge, design, plot = TRUE)
+```
+
+#### Fit linear model for each gene given a series of arrays
+
+```{r}
+fit <- lmFit(v, design) # Linear Model for Series of Arrays
+
+initial.clusters <- data.frame(id = colnames(design),
+                               short_id = gsub(pattern = "initial.cluster", 
+                                               replacement = "", x = colnames(design)),
+                               patient = substr(colnames(design), start = 16, stop = 20))
+head(initial.clusters)
+```
+
+```{r}
+## Automating makeContrasts call in limma
+nc <- nrow(initial.clusters)
+contrast_all <- gtools::permutations(v = as.character(initial.clusters$id), n = nc, r = 2)
+contrast_all <- as.data.frame(contrast_all)
+head(contrast_all)
+```
+
+#### Number of cells in each initial cluster
+
+```{r}
+table(secretory$initial.cluster)
+```
+
+```{r}
+initial.clusters$n_cells <- table(secretory$initial.cluster)
+n_cells_patients <- table(secretory$Patient2)
+initial.clusters$n_cells_patients <- n_cells_patients[match(initial.clusters$patient, names(n_cells_patients))]
+initial.clusters$weight_cluster <- initial.clusters$n_cells/initial.clusters$n_cells_patients
+initial.clusters$paste_weight_id <- paste(initial.clusters$id,"*",initial.clusters$weight_cluster, sep = "")
+```
+
+
+```{r}
+contrast_all$P1 <- substr(contrast_all$V1, start = 16, stop = 20) # patient 1
+contrast_all$P2 <- substr(contrast_all$V2, start = 16, stop = 20) # patient 1
+contrast_all$C1 <- NA
+contrast_all$C2 <- NA
+contrast_all$n_C1 <- NA
+contrast_all$n_C2 <- NA
+for(i in 1:nrow(contrast_all)) {
+    contrast_all$C1[i] <- paste(initial.clusters$paste_weight_id[initial.clusters$patient == contrast_all$P1[i]], collapse = "+")
+    contrast_all$C2[i] <- paste(initial.clusters$paste_weight_id[initial.clusters$patient == contrast_all$P2[i]], collapse = "+")
+}
+head(contrast_all)
+```
+
+
+```{r}
+contrast_matrix <- apply(contrast_all, MARGIN = 1, function(x) return(paste(x[1],"-",x[2],"-(",x[5],")","+(", x[6],")", sep = "")))
+```
+
+```{r}
+cont.matrix <- makeContrasts(contrasts = contrast_matrix,levels=design)
+cont.matrix[,5]
+```
+
+
+```{r}
+fit2 <- contrasts.fit(fit, cont.matrix) # Compute Contrasts from Linear Model Fit
+fit2 <- eBayes(fit2) #Empirical Bayes Statistics for Differential Expression
+# Given a microarray linear model fit, compute moderated t-statistics, moderated F-statistic, and log-odds of differential expression by empirical Bayes moderation of the standard errors towards a common value.
+```
+
+#### Add weights to DEGs
+
+The DE gene weight is decided by the fold change and the ratio of expression proportion.
+
+```{r}
+## parameter:
+## logFC = 0.6
+## p-value = 0.05
+## weight = abs(logFC)*(expr_ratio1+0.01)/(expr_ratio2+0.01)
+## expr_ratio_max > 0.25
+
+n_deg2 <- matrix(0, ncol = nc, nrow = nc)  # number of DE genes
+colnames(n_deg2) <- rownames(n_deg2) <- gsub(x = colnames(design)[1:nc], pattern = "initial.cluster",replacement = "")
+for(i in 1:nc) {
+    for(j in 1:nc) {
+        if(i == j) {
+            n_deg2[i,j] <- 0
+        } else if (j < i) {
+            coef_k = (i-1)*(nc-1)+j
+        } else if (j > i) {
+            coef_k = (i-1)*(nc-1)+j-1
+        }
+        
+        if(i != j) {
+            rls <- topTable(fit2, n = Inf, coef = coef_k, sort = "p", lfc = 0.6, p = 0.05 )
+            if(nrow(rls) > 1) {
+                v_expr <- logcounts(secretory)[rownames(rls), secretory$initial.cluster == rownames(n_deg2)[i]]
+                rls$ratio1 <- rowSums(v_expr > 0.5)/ncol(v_expr)
+                v_expr <- logcounts(secretory)[rownames(rls), secretory$initial.cluster == colnames(n_deg2)[j]]
+                rls$ratio2 <- rowSums(v_expr > 0.5)/ncol(v_expr)
+                rls$ratiomax <- rowMaxs(as.matrix(rls[,c("ratio1", "ratio2")]))
+                rls$ratiomin <- rowMins(as.matrix(rls[,c("ratio1", "ratio2")]))
+                rls <- rls[rls$ratiomax > 0.25, ]
+                n_deg2[i,j] <- sum(apply(rls, MARGIN = 1, function(x) return(abs(x[1]) * (x[9]+0.01)/(x[10]+0.01)))) ## 0.01 is used here to exaggerate the differences of on-off genes
+            } else if (nrow(rls) == 1) {
+                n_deg2[i,j] <- sum(rls$logFC)
+            }
+            ## This eqaution take fold change and expression ratio into account
+            ## Question: should we talk a upper limit to the weight?
+        }
+    }
+}
+```
+
+```{r}
+any(is.na(n_deg2))
+```
+
+
+## Final clustering
+
+```{r}
+## 7 clusters
+hc <- hclust(as.dist(n_deg2))
+hc.cluster <- cutree(hc, k = 10)
+
+colData(secretory)$clincluster.7clusters <- hc.cluster[match(colData(secretory)$initial.cluster, names(hc.cluster))]
+table(colData(secretory)$clincluster.7clusters)
+```
+
+```{r}
+secretory$clincluster.7clusters[secretory$initial.cluster == "11553.2"] <- 8
+colData(secretory)$clincluster.7clusters <- as.factor(colData(secretory)$clincluster.7clusters)
+```
+
+
+```{r}
+## visualisation
+hc <- hclust(as.dist(n_deg2))
+plot(hc);rect.hclust(hc, k = 10, border = "red")
+```
+
+```{r}
+table(secretory$clincluster.7clusters, secretory$initial.cluster  )
+```
+
+```{r}
+table(colData(secretory)$clincluster.7clusters, colData(secretory)$Patient2 )
+```
+
+As we increase the final cluster to 6, we have another rare population Cluster 6.
+
+```{r}
+plotTSNE(secretory, colour_by = "clincluster.7clusters")
+```
+
+
+
+```{r}
+plotTSNE(secretory[,secretory$clincluster_final %in% c("C10","C3","C4","C8")], colour_by = "CPE")
+```
+
+```{r}
+# tiff("../manuscript_plots/FigureS6A_Clustering_FTESCs_tSNE.tiff", res = 300, height = 10, width = 14, units = "cm")
+# plotTSNE(secretory, colour_by = "clincluster")
+# dev.off()
+# 
+# tiff("../manuscript_plots/FigureS6B_Clustering_FTESCs_tSNE_patients.tiff", res = 300, height = 10, width = 14, units = "cm")
+# plotTSNE(secretory, colour_by = "Patient2")
+# dev.off()
+```
+
+```{r}
+secretory$clincluster_final <- secretory$clincluster.7clusters
+secretory$clincluster_final[secretory$clincluster.7clusters == 7] <- 4
+```
+
+
+## Marker genes
+
+```{r}
+markers2 <- c()
+for(i in 1:length(unique(secretory$clincluster_final))){
+    info <- rep("control", ncol(secretory))
+    info[secretory$clincluster_final == unique(secretory$clincluster_final)[i]] <- "group"
+    design <- model.matrix(~ 0 + info)
+    v <- voom(dge, design, plot = F)
+    fit <- lmFit(v, design) # Linear Model for Series of Arrays
+    cont.matrix <- makeContrasts(contrasts = "infogroup-infocontrol",levels=design)
+    fit <- contrasts.fit(fit, cont.matrix ) # Linear Model for Series of Arrays
+    fit <- eBayes(fit)
+    
+    marker <- topTable(fit, p.value = 0.05, number = Inf, coef = 1, lfc = 0.6, sort.by = "logFC")
+    marker <- marker[marker$logFC > 0.6,]
+     
+    v_expr <- logcounts(secretory)[match(rownames(marker), rownames(secretory)), info == "group"]
+    marker$ratio1 <- rowSums(v_expr > 0.5)/ncol(v_expr)
+    v_expr <- logcounts(secretory)[match(rownames(marker), rownames(secretory)), info != "group"]
+    marker$ratio2 <- rowSums(v_expr > 0.5)/ncol(v_expr)
+    marker$gene <- rownames(marker) 
+    marker$cluster <- unique(secretory$clincluster_final)[i]
+    markers2  <- rbind(markers2, marker)
+}
+markers2$cluster <- factor(markers2$cluster)
+View(markers2)
+```
+
+
+```{r}
+top10 <- markers2 %>% group_by(cluster) %>% top_n(3, logFC)
+top10
+```
+
+
+```{r}
+my_col <- RColorBrewer::brewer.pal(12, "Paired")[c(2,8,4,6,10,12,11,9,7,5,3,1)]
+# secretory$clincluster_final <- as.factor(secretory$clincluster_final)
+p1 <- plotTSNE(secretory[,secretory$Patient2 == 11543], colour_by = "clincluster_final") + scale_fill_manual( values = my_col[c(1,2,3,4)])
+p2 <- plotTSNE(secretory[,secretory$Patient2 == 11545], colour_by = "clincluster_final") + scale_fill_manual( values = my_col[c(2,3,4,5,6,8)])
+p3 <- plotTSNE(secretory[,secretory$Patient2 == 11553], colour_by = "clincluster_final") + scale_fill_manual(values = my_col[c(10,4,5,6,8,9)])
+p4 <- plotTSNE(secretory[,secretory$Patient2 == 15066], colour_by = "clincluster_final") + scale_fill_manual( values = my_col[c(10,2,3,4,5,6)])
+p5 <- plotTSNE(secretory[,secretory$Patient2 == 15072], colour_by = "clincluster_final") + scale_fill_manual(values = my_col[c(1,4,5,6,8)])
+cowplot::plot_grid(p1,p2,p3,p4,p5,nrow = 3)
+
+# ggsave("exprloratory_plots/20180121tSNE_Patients_9clusters.pdf", height = 8, width = 7, units = "in", dpi = 150)
+```
+
+```{r}
+table(secretory$clincluster_final, secretory$Patient2)
+```
+
+
+
+## Save data
+
+```{r}
+# saveRDS(secretory, "../rds/20190120Fresh_secretory_9clusters_clincluster.rds", compress = T)
+# write.csv(markers2, "../tables/20190120Clincluster_fresh_secretory_9clusters_markers.csv")
+```
+
+
+```{r}
+# secretory <- readRDS("../rds/20190120Fresh_secretory_9clusters_clincluster.rds")
+# markers2 <- read.csv("../tables/20190120Clincluster_fresh_secretory_9clusters_markers.csv", as.is = T)
+```
+
+## Visualisation
+
+#### TSNE
+
+```{r}
+secretory <- scran::computeSumFactors(secretory)
+secretory <- scater::normalize(secretory)
+```
+
+
+```{r}
+set.seed(123456)
+secretory <- runTSNE(object = secretory, ncomponents = 2, 
+                     feature_set = rownames(secretory)[rowData(secretory)$high.var],
+                  exprs_values = "normcounts",
+                  perplexity = min(50, floor(ncol(secretory)/5)))
+# secretory <- runTSNE(object = secretory, ncomponents = 2, 
+#                      feature_set = markers2$gene[markers2$cluster %in% c("C10","C3","C4","C8")],
+#                      exprs_values = "logcounts", 
+#                      perplexity = min(50, floor(ncol(secretory)/5)))
+secretory <- scater::runUMAP(object = secretory, ncomponents = 2, use_dimred = "PCA", n_dimred = 15,exprs_values = "normcounts")
+```
+
+```{r}
+table(secretory$clincluster_final)
+```
+
+```{r}
+secretory$cell_type <- NA
+secretory$cell_type[secretory$clincluster_final == "C10"] <- "Cell cycle (C9)"
+secretory$cell_type[secretory$clincluster_final == "C3"] <- "Differentiated (C3)"
+secretory$cell_type[secretory$clincluster_final == "C4"] <- "KRT17 (C4)"
+secretory$cell_type[secretory$clincluster_final == "C6"] <- "Stress (C6)"
+secretory$cell_type[secretory$clincluster_final == "C8"] <- "EMT (C7)"
+secretory$cell_type[secretory$clincluster_final == "C9"] <- "Immune (C8)"
+
+secretory$Cell_subtype <- secretory$cell_type
+
+```
+
+
+```{r}
+plotTSNE(secretory[,secretory$clincluster_final %in% c("C3","C4","C8","C10","C9")], colour_by = "Cell_subtype", shape_by = "Patient2") +
+    # theme(legend.position = "top" )  + 
+    xlab("TSNE_1") + ylab("TSNE_2")
+# ggsave("plots/20190508_TSNE_secretory.png", width=5, height = 3.5)
+```
+
+```{r}
+p1 <- plotTSNE(secretory[,secretory$clincluster_final %in% c("C3","C4","C8","C10","C9")], colour_by = "Cell_subtype") +
+    # theme(legend.position = "top" )  + 
+    xlab("TSNE_1") + ylab("TSNE_2")
+
+p2 <- plotTSNE(secretory[,secretory$clincluster_final %in% c("C3","C4","C8","C10","C9")], colour_by = "Patient2") +
+    # theme(legend.position = "top" )  + 
+    xlab("TSNE_1") + ylab("TSNE_2")
+cowplot::plot_grid(p1, p2, rel_widths = c(1.1, 1 ))
+# ggsave("plots/20190508_TSNE_secretory.png", width=5, height = 3.5)
+```
+
+```{r}
+plotUMAP(secretory[,secretory$clincluster_final %in% c("C3","C4","C8","C10","C9")], colour_by = "Cell_subtype") +
+    # theme(legend.position = "top" )  + 
+    xlab("UMAP_1") + ylab("UMAP_2")
+# ggsave("../../revision_analysis_20190827/revision_plots/SI/secretory_UMAP_colSubtype20191007.png", width=5, height = 3.5)
+```
+
+```{r}
+plotTSNE(secretory[,secretory$clincluster_final %in% c("C3","C4","C8","C10","C9")], colour_by = "Patient2") +
+    # theme(legend.position = "top" )  + 
+    xlab("TSNE_1") + ylab("TSNE_2")
+# ggsave("../../revision_analysis_20190827/revision_plots/SI/secretory_TSNE_colPatient20191007.png", width=5, height = 3.5)
+```
+
+```{r}
+plotTSNE(secretory[,secretory$clincluster_final %in% c("C3","C4","C8","C10","C9")], colour_by = "Cell_subtype") +
+    # theme(legend.position = "top" )  + 
+    xlab("TSNE_1") + ylab("TSNE_2")
+# ggsave("../../revision_analysis_20190827/revision_plots/main/secretory_TSNE_colSubtype20191007.png", width=5, height = 3.5)
+```
+
+```{r}
+plotUMAP(secretory[,secretory$clincluster_final %in% c("C3","C4","C8","C10")], colour_by  = "Cell_subtype")
+```
+
+
+#### UMAP
+
+Plot UMAP of all fresh cells
+
+```{r}
+# ciliated.markers <- read.csv("../tables/20180725allFT_clincluster_markers.csv", as.is = T, row.names = 1)
+# ciliated.markers <- ciliated.markers$gene[ciliated.markers$logFC > 5 & ciliated.markers$cluster == 11]
+fresh <- sceset[,sceset$source == "Fresh"]
+
+# hvg only in clude markers of the four secretory cells and ciliated markers
+# feature.set <- c(markers2$gene[markers2$cluster %in% c("C10","C3","C4","C8")], ciliated.markers)
+# set.seed(14567)
+# fresh <- runUMAP(fresh, ncomponents = 2, feature_set = rownames(fresh) %in% feature.set,
+#    exprs_values = "logcounts", scale_features = TRUE)
+
+fresh$cell_type <- NA
+fresh$cell_type[colnames(fresh) %in% colnames(sceset)[sceset$final.clusters == 11]] <- "Ciliated"
+fresh$cell_type[colnames(fresh) %in% colnames(secretory)] <- "Secretory"
+
+table(fresh$cell_type)
+```
+
+```{r}
+plotUMAP(fresh, colour_by = "Patient") + xlab("UMAP_1") + ylab("UMAP_2")
+# p2 <- plotUMAP(fresh, 
+#          colour_by = "Patient2") + xlab("UMAP_1") + ylab("UMAP_2")
+# cowplot::plot_grid(p1,p2)
+# ggsave("exprloratory_plots/20190508UMAP_fresh_only.png", height = 3, width = 6)
+```
+
+
+```{r}
+plotUMAP(fresh, colour_by = "CAPS") + xlab("UMAP_1") + ylab("UMAP_2")
+```
+
+
+```{r}
+plotUMAP(fresh[, fresh$Patient2 == 11545 & fresh$cell_type %in% c("Differentiated (C3)","KRT17 cluster (C4)","Cell cycle (C10)","EMT (C8)","Ciliated")], 
+         colour_by = "cell_type") + xlab("UMAP_1") + ylab("UMAP_2")
+```
+
+
+```{r}
+plotUMAP(fresh[, fresh$cell_type %in% c("C3","C4","C8","C10","Ciliated")], colour_by = "JUN") + xlab("UMAP_1") + ylab("UMAP_2")
+```
+
+
+#### Heatmap
+
+
+
+
+```{r, fig.height=5}
+# secretory$clincluster_final <- paste("C",secretory$clincluster_final, sep = "")
+    
+top10 <- markers2 %>% group_by(cluster) %>% top_n(15, logFC)
+top10 <- top10[!top10$cluster %in% c("C1","C2","C5") ,]
+top10 <- top10[top10$logFC > 1.8, ]
+
+top10 <- top10[order(top10$cluster, decreasing = F),]
+
+plot.data <- logcounts(secretory)[c(top10$gene), order(secretory$clincluster_final, decreasing = F)]
+
+colanno <- data.frame (colData(secretory)[,c("clincluster_final","Patient2")])
+colnames(colanno)[1] <- "clusters"
+colanno$clusters <- factor(colanno$clusters)
+
+rownames(colanno) <- colnames(secretory)
+colanno <- colanno[order(colanno$clusters, decreasing = F),]
+colanno$clusters <- factor(colanno$clusters, levels = unique(colanno$clusters))
+plot.data <- plot.data[,match(rownames(colanno), colnames(plot.data))] 
+
+plot.data <- t(scale(t(plot.data), center = T, scale = T))
+# range(plot.data )
+plot.data <- Seurat::MinMax(plot.data, min = -2.5, max = 2.5)
+
+plot.data<- as.data.frame(x = t(x = plot.data))
+plot.data$cell <- rownames(x = plot.data)
+
+cells.ident <- secretory$clincluster_final
+names(x = cells.ident) <- secretory$Sample
+
+colnames(x = plot.data) <- make.unique(names = colnames(x = plot.data))
+plot.data %>% melt(id.vars = "cell") -> plot.data
+names(x = plot.data)[names(x = plot.data) == 'variable'] <- 'gene'
+names(x = plot.data)[names(x = plot.data) == 'value'] <- 'expression'
+plot.data$ident <- cells.ident[plot.data$cell]
+
+plot.data$gene <- with(
+    data = plot.data,
+    expr = factor(x = gene, levels = rev(x = unique(x = plot.data$gene)))
+    )
+plot.data$cell <- with(
+    data = plot.data,
+    expr = factor(x = cell, levels = unique(x = colnames(secretory)))
+    )
+
+plot.data$ident <- factor(plot.data$ident, levels = c("C1","C2","C10","C3","C4","C5","C6","C8","C9"))
+# http://colorbrewer2.org/#type=sequential&scheme=Blues&n=6
+
+heatmap <- ggplot( data = plot.data, mapping = aes(x = cell, y = gene, fill = expression)) + 
+    geom_tile() +
+    scale_fill_gradient2( # colour
+        low = muted("steelblue4"), mid = "white",
+        high = muted("firebrick2")
+        # low = "purple", mid = "black",
+        # high = "yellow"
+        ) +
+    scale_y_discrete(position = "right", labels = rev(top10$gene)) +
+    theme(
+      axis.line = element_blank(),
+      axis.title.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      strip.text.x = element_text(size = 12),
+      axis.text.y = element_text(size=6, face="italic"),
+      axis.text.x = element_blank(),
+      axis.title.x = element_blank(),
+      strip.background = element_blank()
+    )
+
+heatmap <- heatmap +
+      facet_grid(
+        facets = ~ident,
+        drop = TRUE,
+        space = "free",
+        scales = "free",
+        switch = 'x'
+      ) +
+      scale_x_discrete(expand = c(0, 0), drop = TRUE)  
+      
+panel.spacing <- unit(x = 0.15, units = 'lines')
+heatmap <- heatmap +
+      theme(panel.spacing = panel.spacing)
+
+heatmap
+```
+
+"The other protein of great interest, MCM2, is one of six proteins (MCM 2–7) that comprise the MCM helicase complex involved in the regulation of the S phase of the cell cycle in eukaryotes via the initiation of DNA replication (Kang et al, 2014). High MCM2 expression is reportedly a poor prognostic factor in ovarian cancer (Gakiopoulou et al, 2007). Furthermore, another member of the MCM2 family, MCM7, is reportedly a particularly poor prognostic factor in ovarian HGSC (Ota et al, 2011). In the present study, MCM2 was found to be differentially expressed in tubal and peritoneal HGSCs in addition to ovarian and endometrial HGSCs. "  (https://www.nature.com/articles/bjc201627)
+
+
+
+```{r}
+## Add colour bar
+# plot.data$patient <- secretory$Patient2[match(plot.data$cell, colnames(secretory))]
+# ggplot(plot.data, aes(x = cell, y = 1, fill = ident)) + geom_tile() + theme_void() +
+#       facet_grid(
+#         facets = ~ident,
+#         drop = TRUE,
+#         space = "free",
+#         scales = "free",
+#         switch = 'x'
+#       ) +
+#       theme(panel.spacing = panel.spacing)
+
+```
+
+```{r}
+ggplot(plot.data, aes(x = cell, y = 1, fill = patient)) + geom_tile() + theme_void() + #theme_classic() +
+      facet_grid(
+        facets = ~ident,
+        drop = TRUE,
+        space = "free",
+        scales = "free",
+        switch = 'x'
+      ) +
+      theme(panel.spacing = panel.spacing#, 
+            # axis.text.x = element_text(size = 3, angle = 90)
+            ) 
+# ggsave("../../revision_analysis_20190827/revision_plots/main/Fig2B_bar.pdf", width = 12, height = 3)
+```
+
+
+```{r}
+# ggsave(filename = "../manuscript_plots/secretory subtypes/Figure_secretory_heatmap_9clusters_yellowPurple.pdf", height = 18, width = 24, units = "cm" )
+# ggsave(filename = "../manuscript_plots/secretory subtypes/Figure_secretory_heatmap_9clusters.png",dpi = 300, height = 18, width = 24, units = "cm" )
+```
+
+```{r}
+table(secretory$clincluster_final, secretory$Patient2 )
+```
+
+#### Violin plots of markers for cycling cluster
+
+```{r}
+secretory$clincluster_final  <- as.factor(secretory$clincluster_final)
+
+share.7a3.1 <- c( "MKI67","PCNA","CDK4","CDC45",
+             "FANCD2","FANCI","MSH2","MSH6",
+             "RUVBL2","RUVBL1","HMGB2","SMC1A")
+
+plotExpression(secretory[,secretory$clincluster_final %in% c("C10","C3","C4","C6","C8")], 
+               share.7a3.1,
+               x = "clincluster_final", exprs_values = "logcounts", ncol = 4, xlab = "") + 
+    scale_x_discrete(labels = list("C10"="CC","C3"="C3","C4"="KRT17","C8"="ECM")) + 
+    theme(strip.text = element_text(face = "italic", size = 9))
+          # axis.text.x = element_text(angle = 25, vjust = 0.5, hjust = 0)  )
+
+# ggsave("../manuscript_plots/secretory subtypes/marker_cell_cycle_violin.pdf", height = 8, width = 12, units = "cm", dpi = 300)
+
+# ggsave("../manuscript_plots/secretory subtypes/marker_cell_cycle_violin.png", height = 8, width = 12, units = "cm", dpi = 300)
+```
+
+#### Violin plots
+
+```{r}
+share.7a3.1 <- c( "MKI67","PCNA","CDK4","CDC45",
+             "FANCD2","FANCI","MSH2","MSH6",
+             "RUVBL2","RUVBL1","HMGB2","SMC1A")
+
+
+plotExpression(secretory[,secretory$clincluster_final %in% c("C10","C3","C4","C6","C8")], 
+              share.7a3.1,
+                x = "clincluster_final", exprs_values = "normcounts",
+                ncol = 4, xlab = "") + 
+    theme(strip.text = element_text(size = 10, face = "italic"))
+
+# ggsave("../manuscript_plots/secretory subtypes/marker_cell_cycle_violin.png", height = 8, width = 12, units = "cm", dpi = 300)
+```
+
+
+Cluster 4 is characterized by upregulation of major histocompatibility complex (MHC) Class II genes (e.g. HLA-DQA1, HLA-DPA1 and HLA-DPB1), cytokeratins (KRT17, KRT5 and KRT23) and aldehyde dehydrogenases (e.g. ALDH1A1 and ALDH3B2) 
+
+```{r}
+secretory <- normalize(secretory)
+assay(secretory, "normcounts") <- removeBatchEffect(assay(secretory, "normcounts"), covariates = secretory$total_features)
+assay(secretory, "normcounts")[assay(secretory, "normcounts") <0] <- 0
+
+# sseC4_marker <- c("HLA-DQA1", "HLA-DPA1", "HLA-DPB1",
+#                "KRT17", "KRT5", "KRT23",
+#                "ALDH1A1", "ALDH3B2","CDKN1A")
+sseC4_marker <- c("HLA-DQA1", "HLA-DPA1",# "HLA-DPB1",
+               "KRT17",  "KRT23",
+               "ALDH1A1", "ALDH3B2")
+plotExpression(secretory[,secretory$clincluster_final %in% c("C10","C3","C4","C8")], 
+               sseC4_marker,
+                x = "clincluster_final", exprs_values = "logcounts",
+                ncol = 2, xlab = "") + ylab("Scaled expression") + 
+    theme(strip.text = element_text(size = 10, face = "italic"))
+
+# ggsave("plots/SuppFig3_marker_C4_20190508.png", width = 4, height = 4, dpi = 300)
+```
+
+
+```{r}
+plotExpression(secretory[,secretory$clincluster_final %in% c("C10","C3","C4","C6","C8")], 
+               sseC4_marker,
+                x = "clincluster_final", exprs_values = "logcounts",
+                ncol = 3, xlab = "") + 
+    theme(strip.text = element_text(size = 10, face = "italic"))
+
+```
+
+
+```{r}
+secretory$type <- NA
+secretory$type[secretory$clincluster_final == "C10"] <- "Cell cycle"
+secretory$type[secretory$clincluster_final == "C3"] <- "Differentiated"
+secretory$type[secretory$clincluster_final == "C4"] <- "KRT17"
+secretory$type[secretory$clincluster_final == "C8"] <- "EMT"
+secretory$type <- factor(secretory$type, levels = c("Cell cycle", "Differentiated", "KRT17","EMT"))
+plotExpression(secretory[,secretory$clincluster_final %in% c("C10","C3","C4","C8")], 
+               c("EPCAM","KRT7","SPARC","RGS16"),
+                x = "type", exprs_values = "logcounts",
+                ncol = 2, xlab = "") + 
+    theme(strip.text = element_text(size = 10, face = "italic"),
+          axis.text.x = element_text(angle = 30, vjust = 0.7))
+# ggsave("../../revision_analysis_20190827/revision_plots/main/Fig3a_marker_EMT_Epcam_KRT7.pdf", width = 6, height = 4, dpi = 300)
+# ggsave("plots/SuppFig3_marker_EMT_Epcam_KRT7.png", width = 6, height = 4, dpi = 300)
+```
+
+
+```{r}
+plotPhenoData(secretory, x = "clincluster_final", y = "total_features" )  + geom_hline(yintercept = 7500, col  = "grey50") + geom_hline(yintercept = 1200, col = "grey50") + xlab("Clusters")
+# ggsave("plots/SuppFig3_marker_EMT_Epcam_KRT7.png", width = 6, height = 4, dpi = 300)
+# ggsave("plots/SuppFig3_total_feautres.png", width = 5, height = 4)
+```
+
+
+```{r}
+set.seed(1234)
+secretory <- runUMAP(secretory, ncomponents = 2, feature_set = markers2$gene[markers2$cluster %in% c(3,4,6,7)],
+  exprs_values = "logcounts", scale_features = TRUE)
+
+plotUMAP(secretory[,secretory$clincluster.7clusters%in%c(3,4,6,7)& secretory$Patient2 == 11553], colour_by = "clincluster.7clusters") + xlab("UMAP_1") + ylab("UMAP_2")
+```
+
+
+## Compare to sc16
+
+```{r}
+sc16 <- readRDS("../../20190216scRNA-seq16/clean_data/sceset_sc16.rds")
+stroma <- sc16[,logcounts(sc16)["EPCAM",] == 0 & logcounts(sc16)["PTPRC",] == 0]
+# write.csv(as.data.frame(stroma@colData), "../GEO/sc16_colData.csv")
+# write.table(counts(stroma), "../GEO/sc16_counts.txt", quote = F, sep = "\t")
+dim(stroma)
+```
+
+```{r}
+matrix <- counts(secretory)[,secretory$clincluster_final == "C8"]
+matrix <- cbind(matrix,counts(stroma)[match(rownames(matrix), rownames(stroma)),] )
+matrix <- cpm(matrix)
+dge <- edgeR::DGEList(counts = matrix[rowSums(matrix) > 5, ])
+info <- c(rep("C8", 40), rep("str",91))
+design <- model.matrix(~ 0 + info)
+v <- voom(dge, design, plot = F)
+fit <- lmFit(v, design) # Linear Model for Series of Arrays
+cont.matrix <- makeContrasts(contrasts = "infoC8-infostr",levels=design)
+fit <- contrasts.fit(fit, cont.matrix ) # Linear Model for Series of Arrays
+fit <- eBayes(fit)
+
+C8.m <- topTable(fit, p.value = 0.05, number = Inf, coef = 1, lfc = 0.6, sort.by = "logFC")
+C8.m$gene <- rownames(C8.m)
+which(markers2$gene[markers2$cluster == "C8"] %in% C8.m$gene[C8.m$logFC > 0])
+```
+
+```{r}
+matrix <- counts(secretory)[,secretory$clincluster_final == "C8"]
+matrix <- cbind(matrix, counts(secretory)[,secretory$clincluster_final %in% c("C3","C4","C10")])
+matrix <- cbind(matrix,counts(stroma)[match(rownames(matrix), rownames(stroma)),] )
+info <- c(rep("C8",sum(secretory$clincluster_final == "C8")),
+           rep("secretory", sum(secretory$clincluster_final %in% c("C3","C4","C10"))),
+          rep("str",91))
+matrix <- cpm(matrix)
+dge <- edgeR::DGEList(counts = matrix[rowSums(matrix) > 5, ])
+
+design <- model.matrix(~ 0 + info)
+v <- voom(dge, design, plot = F)
+fit <- lmFit(v, design) # Linear Model for Series of Arrays
+cont.matrix <- makeContrasts(contrasts = c("infoC8-infosecretory","infostr-infosecretory","infostr-infoC8"),levels=design)
+fit <- contrasts.fit(fit, cont.matrix) # Linear Model for Series of Arrays
+fit <- eBayes(fit)
+
+StrvsSec.m <- topTable(fit, p.value = 0.05, number = Inf, coef = 2, lfc = 0.6, sort.by = "logFC")
+StrvsSec.m$gene <- rownames(StrvsSec.m)
+
+C8vsSec.m <- topTable(fit, p.value = 0.05, number = Inf, coef = 1, lfc = 0.6, sort.by = "logFC")
+C8vsSec.m$gene <- rownames(C8vsSec.m)
+
+StrvsC8.m <- topTable(fit, p.value = 0.05, number = Inf, coef = 1, lfc = 0.6, sort.by = "logFC")
+StrvsC8.m$gene <- rownames(StrvsC8.m)
+```
+
+```{r}
+stroma_control <- SingleCellExperiment(assays = list(counts = matrix ), colData = data.frame(Type = info))
+logcounts(stroma_control) <- log1p(calculateCPM(stroma_control))
+
+plotExpression(stroma_control, features = c(markers2$gene[markers2$cluster == "C8"][which(markers2$gene[markers2$cluster == "C8"] %in% C8.m$gene[C8.m$logFC > 0])]), x = "Type", ncol = 4, scales = "free")
+```
+
+```{r}
+plotExpression(stroma_control, features = c("COL1A2","COL3A1"), x = "Type", ncol = 2, scales = "free")  + 
+    scale_x_discrete(labels = c("EMT","Other FTESCs","Stroma"),breaks = c("C8","secretory","str")) + 
+    theme(strip.background = element_rect(fill = "white"),strip.text.x = element_text(face = "italic", size = 12))
+# ggsave("plots/SuppFig3_EMT_stroma_col1a.png", height = 3, width = 5)
+```
+
+
+
+
+```{r}
+plotExpression(stroma_control, features = c("SPARC","RGS16","COL1A2","COL3A1","EPCAM","KRT7"), 
+               x = "Type", ncol = 2, scales = "free") + 
+    scale_x_discrete(labels = c("EMT","Other FTESCs","Stroma"),breaks = c("C8","secretory","str")) + 
+    theme(strip.background = element_rect(fill = "white"),strip.text.x = element_text(face = "italic", size = 12))
+
+# ggsave("plots/SuppFig3_EMT_markers_with_stroma_control.png", width = 6, height = 8)
+```
+
+
+MIR17HG: This gene is the host gene for the MIR17-92 cluster, a group of at least six microRNAs (miRNAs) that may be involved in cell survival, proliferation, differentiation, and angiogenesis. Amplification of this gene has been found in several lymphomas and solid tumors. Two non-protein coding transcript variants have been found for this host gene, but only the longest is a polycistronic transcript containing the MIR17-92 cluster. [provided by RefSeq, May 2012]
+
+RHOB: Also required for stability and nuclear trafficking of AKT1/AKT which promotes endothelial cell survival during vascular development. Serves as a microtubule-dependent signal that is required for the myosin contractile ring formation during cell cycle cytokinesis. Required for genotoxic stress-induced cell death in breast cancer cells.
+
+#### DoubleFinder
+
+```{r}
+fresh_seu <- Seurat::as.seurat(fresh)
+sc16_seu <- Seurat::as.seurat(sc16)
+sc16_seu@meta.data$Source <- "Fresh"
+fresh_seu@meta.data <- fresh_seu@meta.data[,colnames(fresh_seu@meta.data) %in% colnames(sc16_seu@meta.data)]
+sc16_seu@meta.data <- sc16_seu@meta.data[,match(colnames(fresh_seu@meta.data), colnames(sc16_seu@meta.data))]
+
+fresh_seu@meta.data <- fresh_seu@meta.data [,c(1,2,3,4,5,21)]
+sc16_seu@meta.data <- sc16_seu@meta.data [,c(1,2,3,4,5,21)]
+
+seurat <- Seurat::MergeSeurat(object1 = fresh_seu, object2 =  sc16_seu)
+```
+
+```{r}
+seurat <- FindVariableGenes(seurat)
+seurat <- ScaleData(seurat)
+seurat <- RunPCA(seurat, pc.genes =  seurat@var.genes)
+
+fresh2 <- as.SingleCellExperiment(seurat)
+set.seed(12334);fresh2 <- runTSNE(fresh2)
+plotTSNE(fresh2, colour_by  = "PTPRC")
+```
+
+
+```{r}
+library(DoubletFinder)
+```
+
+
+```{r}
+seurat <- NormalizeData(seurat)
+seurat <- FindVariableGenes(seurat, x.low.cutoff = 0.0125, y.cutoff = 0.25, do.plot=FALSE)
+seurat <- ScaleData(object = seurat, genes.use = seurat@var.genes)
+seurat <- RunPCA(seurat, pc.genes = seurat@var.genes, pcs.print = 0)
+seurat <- RunTSNE(seurat, dims.use = 1:10, verbose=TRUE)
+DimElbowPlot(seurat)
+```
+
+```{r}
+seurat <- FindClusters(object = seurat, reduction.type = "pca", dims.use = 1:10, 
+    resolution = 0.3, print.output = 0, save.SNN = TRUE, force.recalc = T)
+TSNEPlot(object = seurat)
+```
+
+
+```{r}
+VlnPlot(object = seurat, features.plot = c("CAPS"))
+```
+
+
+```{r}
+## pK Identification -
+sweep.res.list <- paramSweep(seurat, PCs = 1:10)
+sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+bcmvn <- find.pK(sweep.stats) #0.07
+```
+
+
+
+```{r}
+## Homotypic Doublet Proportion Estimate -------------------------------------------------------------------------------------
+annotations <- seurat@ident
+homotypic.prop <- modelHomotypic(annotations)           ## ex: annotations <- seu_kidney@meta.data$ClusteringResults
+nExp_poi <- round(0.01*length(seurat@cell.names))  ## 1% based on 2000 cells 
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+```
+
+
+```{r}
+## Run DoubletFinder with varying classification stringencies ----------------------------------------------------------------
+seurat <- doubletFinder(seurat, PCs = 1:10, pN = 0.25, pK = 0.07, nExp = nExp_poi, reuse.pANN = FALSE)
+seurat <- doubletFinder(seurat, PCs = 1:10, pN = 0.25, pK = 0.07, nExp = nExp_poi.adj, reuse.pANN = "pANN_0.25_0.07_25")
+```
+
+
+```{r}
+## Plot results --------------------------------------------------------------------------------------------------------------
+seurat@meta.data$DF_hi.lo <- seurat@meta.data$DF.classifications_0.25_0.07_25
+seurat@meta.data$DF_hi.lo[which(seurat@meta.data$DF_hi.lo == "Doublet" & seurat@meta.data$DF.classifications_0.25_0.07_21 == "Singlet")] <- "Doublet_lo"
+seurat@meta.data$DF_hi.lo[which(seurat@meta.data$DF_hi.lo == "Doublet")] <- "Doublet_hi"
+
+TSNEPlot(seurat, group.by="DF_hi.lo", plot.order=c("Doublet_hi","Doublet_lo","Singlet"), colors.use=c("black","gold","red"))
+```
+
+```{r}
+seurat@meta.data$cell_type <- NA
+seurat@meta.data$cell_type <- fresh$cell_type[match(rownames(seurat@meta.data), colnames(fresh))]
+seurat@meta.data$cell_subtype <- secretory$cell_type[match(rownames(seurat@meta.data), colnames(secretory))]
+
+table(seurat@meta.data$cell_subtype, seurat@meta.data$DF_hi.lo)
+```
+
+```{r}
+# saveRDS(seurat,"rds/20190508Seurat_all_fresh_doublefinder.rds", compress = T)
+```
+
+
+## Technical
+
+```{r}
+sessionInfo()
+```
+
+R version 3.5.2 (2018-12-20)
+Platform: x86_64-apple-darwin15.6.0 (64-bit)
+Running under: macOS Mojave 10.14.4
+
+Matrix products: default
+BLAS: /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBLAS.dylib
+LAPACK: /Library/Frameworks/R.framework/Versions/3.5/Resources/lib/libRlapack.dylib
+
+locale:
+[1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+
+attached base packages:
+ [1] grid      parallel  stats4    stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] modes_0.7.0                 ROCR_1.0-7                  gplots_3.0.1.1              KernSmooth_2.23-15          fields_9.6                  maps_3.3.0                 
+ [7] spam_2.2-2                  dotCall64_1.0-0             DoubletFinder_2.0.1         Seurat_2.3.4                Matrix_1.2-15               cowplot_0.9.4              
+[13] bindrcpp_0.2.2              reshape2_1.4.3              scales_1.0.0                dplyr_0.7.8                 edgeR_3.24.3                limma_3.38.3               
+[19] scater_1.10.1               ggplot2_3.1.0               SingleCellExperiment_1.4.1  SummarizedExperiment_1.12.0 DelayedArray_0.8.0          BiocParallel_1.16.5        
+[25] matrixStats_0.54.0          Biobase_2.42.0              GenomicRanges_1.34.0        GenomeInfoDb_1.18.1         IRanges_2.16.0              S4Vectors_0.20.1           
+[31] BiocGenerics_0.28.0        
+
+loaded via a namespace (and not attached):
+  [1] reticulate_1.10          R.utils_2.7.0            tidyselect_0.2.5         htmlwidgets_1.3          trimcluster_0.1-2.1      Rtsne_0.15               devtools_2.0.1          
+  [8] munsell_0.5.0            codetools_0.2-16         ica_1.0-2                statmod_1.4.30           scran_1.10.2             umap_0.1.0.3             withr_2.1.2             
+ [15] colorspace_1.4-0         knitr_1.21               rstudioapi_0.9.0         robustbase_0.93-3        dtw_1.20-1               gbRd_0.4-11              Rdpack_0.10-1           
+ [22] labeling_0.3             lars_1.2                 GenomeInfoDbData_1.2.0   pheatmap_1.0.12          bit64_0.9-7              rhdf5_2.26.2             rprojroot_1.3-2         
+ [29] xfun_0.4                 diptest_0.75-7           R6_2.3.0                 ggbeeswarm_0.6.0         locfit_1.5-9.1           hdf5r_1.0.1              flexmix_2.3-14          
+ [36] bitops_1.0-6             assertthat_0.2.0         SDMTools_1.1-221         nnet_7.3-12              beeswarm_0.2.3           gtable_0.2.0             npsurv_0.4-0            
+ [43] processx_3.2.1           rlang_0.3.1              splines_3.5.2            lazyeval_0.2.1           acepack_1.4.1            checkmate_1.9.1          yaml_2.2.0              
+ [50] backports_1.1.3          Hmisc_4.2-0              tools_3.5.2              usethis_1.4.0            RColorBrewer_1.1-2       proxy_0.4-22             dynamicTreeCut_1.63-1   
+ [57] sessioninfo_1.1.1        ggridges_0.5.1           kknn_1.3.1               Rcpp_1.0.0               plyr_1.8.4               base64enc_0.1-3          zlibbioc_1.28.0         
+ [64] purrr_0.3.0              RCurl_1.95-4.11          ps_1.3.0                 prettyunits_1.0.2        rpart_4.1-13             pbapply_1.4-0            viridis_0.5.1           
+ [71] zoo_1.8-4                cluster_2.0.7-1          fs_1.2.6                 magrittr_1.5             data.table_1.12.0        lmtest_0.9-36            RANN_2.6.1              
+ [78] mvtnorm_1.0-8            fitdistrplus_1.0-14      pkgload_1.0.2            evaluate_0.13            lsei_1.2-0               mclust_5.4.2             gridExtra_2.3           
+ [85] compiler_3.5.2           tibble_2.0.1             crayon_1.3.4             R.oo_1.22.0              htmltools_0.3.6          segmented_0.5-3.0        Formula_1.2-3           
+ [92] snow_0.4-3               tidyr_0.8.2              MASS_7.3-51.1            fpc_2.1-11.1             cli_1.0.1                R.methodsS3_1.7.1        gdata_2.18.0            
+ [99] metap_1.1                bindr_0.1.1              igraph_1.2.3             pkgconfig_2.0.2          foreign_0.8-71           foreach_1.4.4            vipor_0.4.5             
+[106] XVector_0.22.0           bibtex_0.4.2             stringr_1.4.0            callr_3.1.1              digest_0.6.18            tsne_0.1-3               rmarkdown_1.11          
+[113] htmlTable_1.13.1         DelayedMatrixStats_1.4.0 curl_3.3                 kernlab_0.9-27           gtools_3.8.1             modeltools_0.2-22        nlme_3.1-137            
+[120] jsonlite_1.6             Rhdf5lib_1.4.2           BiocNeighbors_1.0.0      desc_1.2.0               viridisLite_0.3.0        pillar_1.3.1             lattice_0.20-38         
+[127] httr_1.4.0               DEoptimR_1.0-8           pkgbuild_1.0.2           survival_2.43-3          glue_1.3.0               remotes_2.0.2            png_0.1-7               
+[134] prabclus_2.2-7           iterators_1.0.10         bit_1.1-14               class_7.3-15             stringi_1.2.4            HDF5Array_1.10.1         mixtools_1.1.0          
+[141] doSNOW_1.0.16            latticeExtra_0.6-28      caTools_1.17.1.1         memoise_1.1.0            irlba_2.3.3              ape_5.2                
+

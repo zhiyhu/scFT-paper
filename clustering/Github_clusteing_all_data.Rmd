@@ -1,0 +1,540 @@
+---
+title: "Clustering all data"
+author: "Zhiyuan Hu"
+date: "01/11/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 10)
+
+# source("https://bioconductor.org/biocLite.R")
+# biocLite("scater")
+# biocLite("SingleCellExperiment")
+
+library(SingleCellExperiment) #1.4.1
+library(scater)#1.10.1
+library(edgeR) #3.24.3
+library(limma) #3.38.3
+library(dplyr) #0.7.8
+library(scales)
+library(reshape2)
+library(knitr)
+library(cowplot)
+```
+
+In this file, we are clustering
+
+## Preprocessing data
+
+Fisrt we read in the preprocessed data.
+
+```{r}
+sceset <- readRDS("../rds/sce_cancerFT_afterQC.rds")
+```
+
+This dataset is after QC. You can see the QC results. There are 3877 QC-passed cells. 
+
+```{r table-sceset-description}
+kable(table(sceset$description))
+```
+
+Now we only keeps the QC-passed ones for the following analysis.
+
+```{r sceset-keep-cell-only}
+sceset <- sceset[,sceset$description == "cell"]
+```
+
+
+#### Scale and centred data
+
+Now we start to prepare for the clustering. The clustering was performed with an in-house protocol called clincluster.
+In this cluster, the cells are clustering based on the condition (fresh, cryopreserved and cultured)
+
+```{r cluster-PrepareData}
+source("clincluster/clincluster_functions.R")
+sceset@colData$source2 <- plyr::mapvalues(x = sceset$source, 
+                                          from = unique(sceset@colData$source), 
+                                          to = c("cryo","fresh","longC", "onC","longC"))
+sceset <- PrepareData(sceset, col.for.cluster = "source2", do.scale = T)
+```
+
+#### High variable genes
+
+Next we select the high variance gene based on the average expression and the dispersion. In total, 1258 genes were found as HVGs.
+
+```{r cluster-find-HighVarGenes}
+sceset <- HighVarGenes(sceset, verbose = T, mean.high.cutoff = 6, mean.low.cutoff = 0.3, dispersion.low.cutoff = 1, dispersion.high.cutoff = 7.5) 
+```
+
+```{r count-number-of-HighVarGenes}
+kable(table(rowData(sceset)$high.var))
+```
+
+The following plot shows the cutoffs for the HVGs selection. In subfigure (A) The x-axis is the average expression and the y-axis is the dispersion of expression scaled by the mean expression. 
+The subfigure (B) is slightly different. the y-axis is the dispersion of expression.
+
+
+```{r plot-gene-mean-and-dispersion}
+df_plot <- data.frame(gene.mean = rowData(sceset)$gene.mean,
+                      gene.dispersion.scaled = rowData(sceset)$gene.dispersion.scaled,
+                      gene.dispersion = rowData(sceset)$gene.dispersion,
+                      high.var = rowData(sceset)$high.var)
+p1 <- ggplot(data = df_plot , aes(x = gene.mean, y = gene.dispersion.scaled, col = high.var) ) +
+      geom_point(alpha=0.4) +  geom_hline(yintercept = 1, alpha = 0.5, col = "grey" ) +
+      geom_vline(xintercept = 0.3, alpha = 0.5, col = "grey" ) + 
+    geom_vline(xintercept = 6, alpha = 0.5, col = "grey")
+p2 <- ggplot(data = df_plot, aes(x = gene.mean, y = gene.dispersion, col = high.var) ) +
+      geom_point(alpha=0.4)
+plot_grid(p1,p2, labels = "AUTO")
+```
+
+
+#### Run tSNE
+
+Next we run the tSNE calculation embeded in scater for visualisation by using the HVGs we just found.
+
+```{r run-tsne}
+set.seed(12345)
+sceset <- runTSNE(object = sceset, ncomponents = 2, feature_set = rownames(sceset)[rowData(sceset)$high.var],
+                  exprs_values = "logcounts",
+                  perplexity = min(50, floor(ncol(sceset)/5)))
+```
+
+
+
+This plot shows you how the data looks on a 2d space.
+
+```{r plot-tsne, fig.height=4}
+p1 <- plotTSNE(sceset, colour_by = "source")
+p2 <- plotTSNE(sceset, colour_by = "Patient2")
+plot_grid(p1,p2,labels = "AUTO")
+```
+
+
+#### Calculate the first 20 PCs
+
+To reduce the dimensions for clustering, we are calculating 20 PCs from HVGs and the log-transformed counts.
+
+```{r runPCA}
+sceset <- runPCA(object = sceset, ncomponents = 20, 
+                 exprs_values = "logcounts", rand_seed = 12345,
+                 feature_set = rownames(sceset)[rowData(sceset)$high.var == TRUE])
+```
+
+```{r plot-pca-percantVar,fig.width=4}
+plot(1:20, attr(sceset@reducedDims$PCA, "percentVar")[1:20])
+```
+
+
+## Initial clustering
+
+### Cluster each group seperately
+
+There are four groups. We first cluster the cells within each group.
+
+```{r table-count-cells-in-groups}
+kable(table(sceset$group.for.cluster))
+```
+
+The initial clustering is based on knn-spectral clustering.
+
+```{r initial.clustering}
+sceset <- InitialCluster(sceset, k = 6, ncomponents = 1:12, n.neighbor = 7)
+```
+
+```{r plot-initial-clustering-res}
+plotTSNE(sceset, colour_by = "initial.cluster")
+```
+
+```{r plot-tsne-initial-clusters-by-group}
+p1 <- plotTSNE(sceset[,sceset$source2 == "fresh"], colour_by = "initial.cluster")
+p2 <- plotTSNE(sceset[,sceset$source2 == "cryo"], colour_by = "initial.cluster")
+p3 <- plotTSNE(sceset[,sceset$source2 == "longC"], colour_by = "initial.cluster")
+p4 <- plotTSNE(sceset[,sceset$source2 == "onC"], colour_by = "initial.cluster")
+cowplot::plot_grid(p1,p2,p3,p4)
+```
+
+## Calculating the distance matrix by limma voom
+
+#### Making DGEList
+
+First we remove lowly expressed genes. 18099 genes are kept for DE analysis
+
+```{r remove lowly expressed genes before limma}
+matrix <- expm1(logcounts(sceset))
+keep <- rowSums(matrix > 1) > 5
+sum(keep)
+```
+
+```{r make-edgeR-DGEList}
+dge <- edgeR::DGEList(counts = matrix[keep,]) # make a edgeR object
+rm(matrix,keep)
+sceset@colData$initial.cluster <- gsub(pattern = " ", replacement = "_", x = sceset@colData$initial.cluster)
+sceset@colData$initial.cluster <- gsub(pattern = "-", replacement = "_", x = sceset@colData$initial.cluster)
+design <- model.matrix(~  0 + initial.cluster, data = sceset@colData)  # Use 0 because we do not need intercept for this linear model
+colnames(design)
+```
+
+#### voom
+
+```{r clincluster-voom}
+v <- voom(dge, design, plot = F)
+fit <- lmFit(v, design)
+
+initial.clusters <- colnames(design)
+nc <- ncol(design)
+## Automating makeContrasts call in limma
+contrast_all <- gtools::permutations(v = initial.clusters, n = nc, r = 2)
+contrast_all <- apply(contrast_all, MARGIN = 1, function(x) return(paste(x[1],"-",x[2], sep = "")))
+cont.matrix <- makeContrasts(contrasts = contrast_all,
+                             levels=design)
+
+fit2 <- contrasts.fit(fit, cont.matrix) 
+fit2 <- eBayes(fit2) 
+```
+
+#### Distance matrix
+
+```{r calc-distance-matrix}
+n_deg <- matrix(0, ncol = nc, nrow = nc)  # number of DE genes
+colnames(n_deg) <- rownames(n_deg) <- gsub(x = colnames(design)[1:nc], pattern = "initial.cluster",replacement = "")
+
+logcount <- logcounts(sceset)[rownames(sceset) %in% rownames(dge),]
+
+for(i in 1:(nc-1)) {
+    for(j in (i+1):nc) {
+        if(i == j) {
+            n_deg[i,j] <- 0
+        } else if (j < i) {
+            coef_k = (i-1)*(nc-1)+j
+        } else if (j > i) {
+            coef_k = (i-1)*(nc-1)+j-1
+        }
+        
+        if(i != j) {
+            rls <- topTable(fit2, n = Inf, coef = coef_k, sort = "p", lfc = 0.6, p = 0.05 )
+            if(nrow(rls) > 1) {
+                v_expr <- logcount[match(rownames(rls),rownames(logcount)), sceset$initial.cluster == rownames(n_deg)[i]]
+                rls$ratio1 <- rowSums(v_expr > 0.5)/ncol(v_expr)
+                v_expr <- logcount[match(rownames(rls),rownames(logcount)), sceset$initial.cluster == colnames(n_deg)[j]]
+                rls$ratio2 <- rowSums(v_expr > 0.5)/ncol(v_expr)
+                rls$ratiomax <- rowMaxs(as.matrix(rls[,c("ratio1", "ratio2")]))
+                rls$ratiomin <- rowMins(as.matrix(rls[,c("ratio1", "ratio2")]))
+                rls <- rls[rls$ratiomax > 0.25, ]
+                n_deg[i,j] <- sum(apply(rls, MARGIN = 1, function(x) return(abs(x[1]) * (x[9]+0.01)/(x[10]+0.01)))) ## 0.01 is used here to enhance the differences of on-off genes
+            } else if (nrow(rls) == 1) {
+                n_deg[i,j] <- sum(rls$logFC)
+            }
+            ## This eqaution take fold change and expression ratio into account
+        }
+    }
+}
+
+n_deg <- n_deg + t(n_deg)
+```
+
+## Final cluster
+
+
+```{r final-cluster-plot-tree, fig.width=6}
+hc <- hclust(as.dist(n_deg))
+plot(hc); rect.hclust(hc, k = 12, border = "red")
+```
+
+
+```{r final-clustering-cut-tree}
+hc.cluster <- cutree(hc, k = 12)
+colData(sceset)$clincluster <- hc.cluster[match(colData(sceset)$initial.cluster, names(hc.cluster))]
+colData(sceset)$clincluster <- as.factor(colData(sceset)$clincluster)
+table(colData(sceset)$clincluster)
+```
+
+```{r plot-tsne-clincluster-results}
+plotTSNE(sceset, colour_by = "clincluster")
+```
+
+
+## Identifying marker genes
+
+```{r Identifying-marker-genes-for-clincluster-clusters}
+matrix <- expm1(logcounts(sceset))
+keep <- rowSums(matrix > 1) > 5
+dge <- edgeR::DGEList(counts = matrix[keep,]) # make a edgeR object
+
+logcount <- logcounts(sceset)[rownames(sceset) %in% rownames(dge),]
+markers <- c()
+
+# pb <- txtProgressBar(min = 0, max =  (length(unique(sceset$clincluster))), style = 3)
+for(i in 1:length(unique(sceset$clincluster))){
+    info <- rep("control", ncol(sceset))
+    info[sceset$clincluster == i] <- "group"
+    design <- model.matrix(~ 0 + info)
+    v <- voom(dge, design, plot = F)
+    fit <- lmFit(v, design) # Linear Model for Series of Arrays
+    cont.matrix <- makeContrasts(contrasts = "infogroup-infocontrol",levels=design)
+    fit <- contrasts.fit(fit, cont.matrix ) # Linear Model for Series of Arrays
+    fit <- eBayes(fit)
+    
+    marker <- topTable(fit, p.value = 0.05, number = Inf, coef = 1, lfc = 0.6, sort.by = "logFC")
+    marker <- marker[marker$logFC > 0.6,]
+     
+     v_expr <- logcount[match(rownames(marker),rownames(logcount)), info == "group"]
+     marker$ratio1 <- rowSums(v_expr > 0.5)/ncol(v_expr)
+     v_expr <- logcount[match(rownames(marker),rownames(logcount)),info != "group"]
+     marker$ratio2 <- rowSums(v_expr > 0.5)/ncol(v_expr)
+                
+    marker$gene <- rownames(marker) 
+    marker$cluster <- i
+    markers  <- rbind(markers, marker)
+    # setTxtProgressBar(pb, i)
+}
+# close(pb)
+markers$cluster <- factor(markers$cluster)
+```
+
+```{r show-top-maker-genes}
+top10 <- markers %>% group_by(cluster) %>% top_n(10, logFC)
+kable(top10)
+```
+
+
+```{r clean-space, echo=F}
+rm(v)
+gc()
+```
+
+
+## Heatmap
+
+```{r plot-heatmap, fig.height=8, fig.width=7}
+markers <- markers[rowMaxs(as.matrix(markers[,c("ratio1","ratio2")])) > 0.4,]
+    
+top10 <- markers %>% group_by(cluster) %>% top_n(10, logFC)
+plot.data <- logcounts(sceset)[top10$gene, order(sceset$clincluster, decreasing = F)]
+
+colanno <- data.frame (colData(sceset)[,c("clincluster","Patient2")])
+colnames(colanno)[1] <- "clusters"
+colanno$clusters <- factor(colanno$clusters)
+
+rownames(colanno) <- colnames(sceset)
+colanno <- colanno[order(colanno$clusters, decreasing = F),]
+colanno$clusters <- factor(colanno$clusters, levels = unique(colanno$clusters))
+plot.data <- plot.data[,match(rownames(colanno), colnames(plot.data))] 
+
+plot.data <- t(scale(t(plot.data), center = T, scale = T))
+plot.data <- Seurat::MinMax(plot.data, min = -2, max = 2)
+
+plot.data<- as.data.frame(x = t(x = plot.data))
+plot.data$cell <- rownames(x = plot.data)
+
+cells.ident <- sceset$clincluster
+names(x = cells.ident) <- sceset$Sample
+ 
+colnames(x = plot.data) <- make.unique(names = colnames(x = plot.data))
+plot.data %>% melt(id.vars = "cell") -> plot.data
+names(x = plot.data)[names(x = plot.data) == 'variable'] <- 'gene'
+names(x = plot.data)[names(x = plot.data) == 'value'] <- 'expression'
+plot.data$ident <- cells.ident[plot.data$cell]
+
+ plot.data$gene <- with(
+    data = plot.data,
+    expr = factor(x = gene, levels = rev(x = unique(x = plot.data$gene)))
+  )
+   plot.data$cell <- with(
+    data = plot.data,
+    expr = factor(x = cell, levels = unique(x = colnames(sceset)))
+  )
+
+my_colours <- colorRampPalette(c("steelblue4", "white", "firebrick2"))(200)
+
+heatmap <- ggplot( data = plot.data, mapping = aes(x = cell, y = gene, fill = expression)) + geom_tile() +
+    scale_fill_gradient2(
+        # low = muted("blue"), mid = "white", high = muted("red")
+        low = muted("steelblue4"), mid = "white",
+        high = muted("firebrick2"),
+      name= "Expression", guide = guide_colorbar(
+        direction = "vertical",
+        title.position = "top"
+      )
+    ) +
+    scale_y_discrete(position = "right", labels = rev(top10$gene)) +
+    theme(
+      axis.line = element_blank(),
+      axis.title.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      strip.text.x = element_text(size = 15),
+      axis.text.y = element_text(size = 6),
+      axis.text.x = element_text(size = 6),
+      axis.title.x = element_blank()
+    )
+
+heatmap <- heatmap +
+      facet_grid(
+        facets = ~ident,
+        drop = TRUE,
+        space = "free",
+        scales = "free",
+        switch = 'x'
+      ) +
+      scale_x_discrete(expand = c(0, 0), drop = TRUE)  +
+      theme(
+        axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.line = element_blank(),
+        axis.title.y = element_blank(),
+        axis.ticks.y = element_blank()
+      )
+
+panel.spacing <- unit(x = 0.15, units = 'lines')
+heatmap <- heatmap +
+      theme(strip.background = element_blank(), panel.spacing = panel.spacing)
+
+heatmap
+```
+
+
+## Save results
+
+```{r save-sce-rds}
+# saveRDS(sceset,"../rds/20180917Sceset_12clusters.rds", compress = T)
+# write.csv(markers,"../tables/20180917sceset_markers_12cluster.csv", row.names = T)
+```
+
+## Figures
+
+### Figure 1C
+
+```{r annotate-clusters}
+current.cluster.ids <- c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ,12)
+new.cluster.ids <- c("Leukocyte", 
+                     "Cultured ciliated",
+                     "O.N. cultured FTESCs",
+                     "Cultured ciliated",
+                     "O.N. cultured FTESCs",
+                     "Stromal cells", 
+                     "Fresh FTESCs",
+                     "Fresh FTESCs",
+                     "Fresh ciliated",
+                     "Long cultured FTESCs 2", 
+                     "Long cultured FTESCs 1", 
+                     "O.N. cultured FTESCs")
+sceset$ident <- plyr::mapvalues(x = sceset$clincluster, from = current.cluster.ids, to = new.cluster.ids)
+sceset$ident <- factor(sceset$ident,
+                       levels = c("Fresh FTESCs",
+                                  "Fresh ciliated",
+                                  "O.N. cultured FTESCs",
+                                  "Cultured ciliated",
+                                  "Long cultured FTESCs 1", 
+                                  "Long cultured FTESCs 2", 
+                                  "Leukocyte",
+                                  "Stromal cells"))
+
+sceset$sources <- sceset$source
+sceset$sources[sceset$sources %in% c("2-day cultured", "6-day cultured")] <- "Long cultured" 
+sceset$sources <- factor(sceset$sources, levels = c("Fresh","O.N. cultured","cryopreserved",
+                                                    "Long cultured"))
+
+```
+
+```{r tsne-plot-by-identification}
+plotTSNE(object = sceset,  colour_by = "ident")
+```
+
+
+t-SNE plot profiles ~3,600 single-cell transcriptome from fallopian tubes coloured by patients 
+
+```{r tsne-plot-by-patient}
+plotTSNE(sceset,  colour_by = "Patient2")
+# ggsave("../manuscript_plots/FigureS1A_tsne.tiff", res = 300, width = 7, height = 5.5, units = "in")
+```
+
+
+Expression plot of secretory markers PAX8, KART7, ciliated markers CAPS and CCDC17.
+
+```{r plot-tsne-by-markers, fig.width=12, fig.height=5}
+p1 <- plotTSNE(sceset,  colour_by = "EPCAM")
+p2 <- plotTSNE(sceset,  colour_by = "PTPRC")
+p3 <- plotTSNE(sceset,  colour_by = "PAX8")
+p4 <- plotTSNE(sceset,  colour_by = "KRT7")
+p5 <- plotTSNE(sceset,  colour_by = "CAPS")
+p6 <- plotTSNE(sceset,  colour_by = "CCDC17")
+p7 <-plotTSNE(sceset,  colour_by = "CCDC78")
+cowplot::plot_grid(p1,p2,p3,p4,p5,p6,p7, ncol=4)
+```
+
+
+##### Fresh cells
+
+```{r, fig.width=6,fig.height=3}
+fresh <- sceset[,sceset$source == "Fresh"]
+
+fresh$type <- "Secretory"
+fresh$type[fresh$ident == "Fresh ciliated"] <- "Ciliated"
+plotExpression(fresh, x = "type", features = c("KRT7","PAX8"), ncol = 5,xlab = "Cell type")  + theme(strip.text = element_text(size = 12, face = "italic") )
+# ggsave("plots/SuppFig1H_secretory_markers.png", height = 2, width = 3.5)
+```
+
+```{r, fig.width=12,fig.height=3}
+plotExpression(fresh, x = "type", features = c("CCDC17","CCDC78","CAPS","FOXJ1"), ncol = 5,xlab = "Cell type")  + theme(strip.text = element_text(size = 12, face = "italic") )
+
+# ggsave("../../revision_analysis_20190827/revision_plots/SI/SuppFig1I_ciliated_markers_foxj1ADDED.png", height = 2, width = 5.7)
+```
+
+```{r}
+# saveRDS(sceset,"../rds/sce_cancerFT_clustered.rds")
+```
+
+
+
+## Technical
+
+```{r}
+sessionInfo()
+```
+
+R version 3.5.2 (2018-12-20)
+Platform: x86_64-apple-darwin15.6.0 (64-bit)
+Running under: macOS Mojave 10.14.4
+
+Matrix products: default
+BLAS: /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBLAS.dylib
+LAPACK: /Library/Frameworks/R.framework/Versions/3.5/Resources/lib/libRlapack.dylib
+
+locale:
+[1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+
+attached base packages:
+ [1] grid      parallel  stats4    stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] modes_0.7.0                 ROCR_1.0-7                  gplots_3.0.1.1              KernSmooth_2.23-15          fields_9.6                  maps_3.3.0                 
+ [7] spam_2.2-2                  dotCall64_1.0-0             DoubletFinder_2.0.1         Seurat_2.3.4                Matrix_1.2-15               cowplot_0.9.4              
+[13] bindrcpp_0.2.2              reshape2_1.4.3              scales_1.0.0                dplyr_0.7.8                 edgeR_3.24.3                limma_3.38.3               
+[19] scater_1.10.1               ggplot2_3.1.0               SingleCellExperiment_1.4.1  SummarizedExperiment_1.12.0 DelayedArray_0.8.0          BiocParallel_1.16.5        
+[25] matrixStats_0.54.0          Biobase_2.42.0              GenomicRanges_1.34.0        GenomeInfoDb_1.18.1         IRanges_2.16.0              S4Vectors_0.20.1           
+[31] BiocGenerics_0.28.0        
+
+loaded via a namespace (and not attached):
+  [1] reticulate_1.10          R.utils_2.7.0            tidyselect_0.2.5         htmlwidgets_1.3          trimcluster_0.1-2.1      Rtsne_0.15               devtools_2.0.1          
+  [8] munsell_0.5.0            codetools_0.2-16         ica_1.0-2                statmod_1.4.30           scran_1.10.2             umap_0.1.0.3             withr_2.1.2             
+ [15] colorspace_1.4-0         knitr_1.21               rstudioapi_0.9.0         robustbase_0.93-3        dtw_1.20-1               gbRd_0.4-11              Rdpack_0.10-1           
+ [22] labeling_0.3             lars_1.2                 GenomeInfoDbData_1.2.0   pheatmap_1.0.12          bit64_0.9-7              rhdf5_2.26.2             rprojroot_1.3-2         
+ [29] xfun_0.4                 diptest_0.75-7           R6_2.3.0                 ggbeeswarm_0.6.0         locfit_1.5-9.1           hdf5r_1.0.1              flexmix_2.3-14          
+ [36] bitops_1.0-6             assertthat_0.2.0         SDMTools_1.1-221         nnet_7.3-12              beeswarm_0.2.3           gtable_0.2.0             npsurv_0.4-0            
+ [43] processx_3.2.1           rlang_0.3.1              splines_3.5.2            lazyeval_0.2.1           acepack_1.4.1            checkmate_1.9.1          yaml_2.2.0              
+ [50] backports_1.1.3          Hmisc_4.2-0              tools_3.5.2              usethis_1.4.0            RColorBrewer_1.1-2       proxy_0.4-22             dynamicTreeCut_1.63-1   
+ [57] sessioninfo_1.1.1        ggridges_0.5.1           kknn_1.3.1               Rcpp_1.0.0               plyr_1.8.4               base64enc_0.1-3          zlibbioc_1.28.0         
+ [64] purrr_0.3.0              RCurl_1.95-4.11          ps_1.3.0                 prettyunits_1.0.2        rpart_4.1-13             pbapply_1.4-0            viridis_0.5.1           
+ [71] zoo_1.8-4                cluster_2.0.7-1          fs_1.2.6                 magrittr_1.5             data.table_1.12.0        lmtest_0.9-36            RANN_2.6.1              
+ [78] mvtnorm_1.0-8            fitdistrplus_1.0-14      pkgload_1.0.2            evaluate_0.13            lsei_1.2-0               mclust_5.4.2             gridExtra_2.3           
+ [85] compiler_3.5.2           tibble_2.0.1             crayon_1.3.4             R.oo_1.22.0              htmltools_0.3.6          segmented_0.5-3.0        Formula_1.2-3           
+ [92] snow_0.4-3               tidyr_0.8.2              MASS_7.3-51.1            fpc_2.1-11.1             cli_1.0.1                R.methodsS3_1.7.1        gdata_2.18.0            
+ [99] metap_1.1                bindr_0.1.1              igraph_1.2.3             pkgconfig_2.0.2          foreign_0.8-71           foreach_1.4.4            vipor_0.4.5             
+[106] XVector_0.22.0           bibtex_0.4.2             stringr_1.4.0            callr_3.1.1              digest_0.6.18            tsne_0.1-3               rmarkdown_1.11          
+[113] htmlTable_1.13.1         DelayedMatrixStats_1.4.0 curl_3.3                 kernlab_0.9-27           gtools_3.8.1             modeltools_0.2-22        nlme_3.1-137            
+[120] jsonlite_1.6             Rhdf5lib_1.4.2           BiocNeighbors_1.0.0      desc_1.2.0               viridisLite_0.3.0        pillar_1.3.1             lattice_0.20-38         
+[127] httr_1.4.0               DEoptimR_1.0-8           pkgbuild_1.0.2           survival_2.43-3          glue_1.3.0               remotes_2.0.2            png_0.1-7               
+[134] prabclus_2.2-7           iterators_1.0.10         bit_1.1-14               class_7.3-15             stringi_1.2.4            HDF5Array_1.10.1         mixtools_1.1.0          
+[141] doSNOW_1.0.16            latticeExtra_0.6-28      caTools_1.17.1.1         memoise_1.1.0            irlba_2.3.3              ape_5.2       
