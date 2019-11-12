@@ -1,0 +1,446 @@
+---
+title: "CNVs in single cell FTE of Patient 11528"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache.lazy = T)
+```
+
+```{r}
+suppressPackageStartupMessages(library(HoneyBADGER))
+suppressPackageStartupMessages(library(Rsamtools))
+suppressPackageStartupMessages(library(SingleCellExperiment))
+suppressPackageStartupMessages(library(scater))
+suppressPackageStartupMessages(library(ggplot2))
+load("~/OneDrive - OnTheHub - The University of Oxford/Project scRNAseq analysis/LOH/R/20180712P11528.RData")
+```
+
+
+```{r}
+table(cov.sc["chr17:7577515-7577515",] > 0, r["chr17:7577515-7577515",] >0)
+```
+
+For somatic mutation chr17:7577515-7577515 in tumour:
+* 194 cells do not have coverage
+* 17 cells only have mutated allele
+* 13 cells only have reference allele
+
+## VAF plot for P11528 tumour
+
+```{r}
+which(sapply(NR$`11528_Blood_Exm`,length) == 2)
+```
+
+```{r, fig.width=6, fig.height=3}
+NR[2579,] <- c(30,119)
+NV[2579,1:2] <- c(12,31)
+blood <- unlist(NV[,1])/unlist(NR[,1])
+tumour <- unlist(NV[,2])/unlist(NR[,2])
+source("../../WES_analysis/R/Ahmed_functions.R")
+
+df <- data.frame(chr = NV$chr,
+                 pos = NV$pos,
+                 vaf = tumour)
+
+df <- replaceChroms(df,1)
+df <- df[order( as.numeric(as.character(df[,2]))),]
+df <- df[order(df[,1]),]
+plot(df[,3], cex= 0.5, xaxt="n", xlab="", pch=20, las=1, col=rgb(0,0,0,alpha=0.3) , ylab = "VAF of 11528 tumour")
+plotChroms(df, 1, 0.5, "blue")
+```
+
+In tumour sample, we can see highly confident LOH on Chromosome 2, 13, 15, 17 and 22. It also suggests that there is LOH on TP53.
+
+```{r, fig.width=6, fig.height=3}
+df <- data.frame(chr = NV$chr,
+                 pos = NV$pos,
+                 vaf = blood)
+df <- replaceChroms(df,1)
+df <- df[order( as.numeric(as.character(df[,2]))),]
+df <- df[order(df[,1]),]
+plot(df[,3], cex= 0.5, xaxt="n", xlab="", pch=20, las=1, col=rgb(0,0,0,alpha=0.3) , ylab = "VAF of 11528 blood")
+plotChroms(df, 1, 0.5, "blue")
+```
+
+```{r}
+df <- cbind(NV, NR)
+colnames(df)[1:2] <- c("Blood_NV", "Tumour_NV")
+colnames(df)[6:7] <- c("Blood_NR", "Tumour_NR")
+df$tumour_vaf <- unlist(df$Tumour_NV)/unlist(df$Tumour_NR)
+df$blood_vaf <- unlist(df$Blood_NV)/unlist(df$Blood_NR)
+
+# filter out homozygous 
+df <- df[df$blood_vaf < 0.7 & df$blood_vaf > 0.3 ,]#& (df$tumour_vaf > 0.6 | df$tumour_vaf < 0.4),] 
+df <- na.omit(df)
+chr <- rep(as.character(df$chr), 2)
+pos <- as.numeric(rep(as.character(df$pos), 2))
+df2 <- data.frame(chr  = chr,
+                 pos =  pos,
+                 vaf = c(unlist(df$tumour_vaf),unlist(df$blood_vaf)),
+                 nr  = c(unlist(df$Tumour_NR),unlist(df$Blood_NR)),
+                 sample = c(rep("Tumour",nrow(df)), rep("Blood",nrow(df))))
+df2$chr <- factor(df2$chr, levels = paste("chr", 1:22, sep = ""))
+df2$vaf[df2$vaf < 0.6 & df2$vaf > 0.4] <- 0.5
+# df2$vaf <- 0.5-abs(df2$vaf - 0.5)
+df2$vaf[df2$vaf > 0.8] <- 1
+df2$vaf[df2$vaf < 0.2] <- 0
+head(df2)
+for(i in unique(df2$chr))
+{
+  df2$pos[df2$chr == i] <- (df2$pos[df2$chr == i]-min(df2$pos[df2$chr == i]))/(max(df2$pos[df2$chr == i])-min(df2$pos[df2$chr == i]))
+}
+```
+
+## VAF point plot: blood v.s. tumour
+
+```{r, fig.width=10, fig.height=2}
+ggplot(df2[!is.nan(df2$vaf),], aes(x = pos, y = sample)) + 
+  geom_point(aes(col = vaf, size = nr)) + 
+  facet_wrap( ~ chr , ncol = 22)+
+  ggplot2::scale_size_continuous(range = c(0, 6))+
+  scale_colour_gradient2(mid="yellow", low = "turquoise", high = "red", midpoint=0.5)+
+  ggplot2::theme(panel.grid.major = ggplot2::element_blank(), panel.grid.minor = ggplot2::element_blank(),panel.background = ggplot2::element_blank(),
+                 axis.text.x=ggplot2::element_blank(),axis.title.x=ggplot2::element_blank(),axis.ticks.x=ggplot2::element_blank(),legend.position="none",
+                 panel.border = ggplot2::element_rect(fill = NA, linetype = "solid", colour = "black"),plot.title = ggplot2::element_text(hjust = 0.5) ) 
+```
+
+
+```{r, fig.width=10, fig.height=2}
+ggplot(df2[df2$chr %in% c("chr2","chr6","chr13","chr15","chr17","chr22") & (!is.nan(df2$vaf)),], aes(x = pos, y = sample)) + 
+  geom_point(aes(col = vaf, size = nr)) + 
+  facet_wrap( ~ chr , ncol = 22)+
+  ggplot2::scale_size_continuous(range = c(0, 10))+
+  scale_colour_gradient2(mid="yellow", low = "turquoise", high = "red", midpoint=0.5)+
+  ggplot2::theme(panel.grid.major = ggplot2::element_blank(), panel.grid.minor = ggplot2::element_blank(),panel.background = ggplot2::element_blank(),axis.text.x=ggplot2::element_blank(),axis.title.x=ggplot2::element_blank(),axis.ticks.x=ggplot2::element_blank(),
+                    legend.position="bottom",panel.border = ggplot2::element_rect(fill = NA, linetype = "solid", colour = "black"),plot.title = ggplot2::element_text(hjust = 0.5))
+```
+
+```{r, fig.width=10, fig.height=2}
+ggplot(df2[df2$chr %in% c("chr2") & (!is.nan(df2$vaf)),], aes(x = pos, y = sample)) + 
+  geom_point(aes(col = vaf, size = nr)) + 
+  facet_wrap( ~ chr , ncol = 22)+
+  ggplot2::scale_size_continuous(range = c(0, 15))+
+  scale_colour_gradient2(mid="yellow", low = "turquoise", high = "red", midpoint=0.5)+
+  ggplot2::theme(panel.grid.major = ggplot2::element_blank(), panel.grid.minor = ggplot2::element_blank(),panel.background = ggplot2::element_blank(),
+                 axis.text.x=ggplot2::element_blank(),axis.title.x=ggplot2::element_blank(),axis.ticks.x=ggplot2::element_blank(),legend.position="bottom",
+                 panel.border = ggplot2::element_rect(fill = NA, linetype = "solid", colour = "black"),
+                 plot.title = ggplot2::element_text(hjust = 0.5)) 
+```
+
+```{r, fig.width=10, fig.height=2}
+ggplot(df2[df2$chr %in% c("chr6") & (!is.nan(df2$vaf)),], aes(x = pos, y = sample)) + 
+  geom_point(aes(col = vaf, size = nr)) + 
+  facet_wrap( ~ chr , ncol = 22)+
+  ggplot2::scale_size_continuous(range = c(0, 15))+
+  scale_colour_gradient2(mid="yellow", low = "turquoise", high = "red", midpoint=0.5)+
+  ggplot2::theme(panel.grid.major = ggplot2::element_blank(), panel.grid.minor = ggplot2::element_blank(),panel.background = ggplot2::element_blank(),
+                 axis.text.x=ggplot2::element_blank(),axis.title.x=ggplot2::element_blank(),axis.ticks.x=ggplot2::element_blank(),legend.position="bottom",
+                 panel.border = ggplot2::element_rect(fill = NA, linetype = "solid", colour = "black"),
+                 plot.title = ggplot2::element_text(hjust = 0.5)) 
+```
+
+## 17 cells with TP53 mutations
+
+For these cells, we can see lose of chr6q, chr13, chr15, chr 17 and chr 22.
+
+```{r, fig.width=10, fig.height=3}
+library(TxDb.Hsapiens.UCSC.hg19.knownGene) ## in order to map SNPs to genes
+txdb <- TxDb.Hsapiens.UCSC.hg19.knownGene
+hb <- new('HoneyBADGER', name='P11528')
+hb$setAlleleMats(r.init=r[,r["chr17:7577515-7577515",] > 0],
+                 n.sc.init=cov.sc[, r["chr17:7577515-7577515",] > 0], 
+                 filter = F,
+                 het.deviance.threshold=0.1, n.cores = 4) # 17 cells with mutated TP53 > 0
+
+hb$setGeneFactors(txdb) ## map SNPs to genes
+hb$plotAlleleProfile() ## visualize individual SNPs
+```
+
+```{r, fig.width=6, fig.height=2}
+hb$plotAlleleProfile(chr = c("chr2","chr6","chr13","chr15","chr17","chr22")) ## visualize individual SNPs
+```
+
+
+
+# 13 cells without TP53 mutation (but have coverage on this loci)
+
+The cells without mutation do not have obvious CNVs on chromosomal level.
+
+```{r, fig.width=10, fig.height=3}
+hb2 <- new('HoneyBADGER', name='P11528')
+hb2$setAlleleMats(r.init=r[,cov.sc["chr17:7577515-7577515",] > 0 & r["chr17:7577515-7577515",] == 0],
+                 n.sc.init=cov.sc[,cov.sc["chr17:7577515-7577515",] > 0 & r["chr17:7577515-7577515",] == 0], filter = F,
+                 het.deviance.threshold=0.1, n.cores = 4)
+
+hb2$setGeneFactors(txdb) ## map SNPs to genes
+hb2$plotAlleleProfile() ## visualize individual SNPs
+```
+
+```{r, fig.height=2, fig.width=6}
+hb2$plotAlleleProfile(chr = c("chr2","chr6","chr13","chr15","chr17","chr22")) ## visualize individual SNPs
+```
+
+# 194 cells without coverage on the muated tp53 loci
+
+```{r, fig.width=10}
+hb3 <- new('HoneyBADGER', name='P11528')
+hb3$setAlleleMats(r.init=r[,cov.sc["chr17:7577515-7577515",] == 0],
+                 n.sc.init=cov.sc[,cov.sc["chr17:7577515-7577515",] == 0], filter = F,
+                 het.deviance.threshold=0.1, n.cores = 4)
+# 4536 heterozygous SNPs identified 
+hb3$setGeneFactors(txdb) ## map SNPs to genes
+hb3$plotAlleleProfile() ## visualize individual SNPs
+```
+
+```{r, fig.height=5}
+hb3$plotAlleleProfile(chr = c("chr2","chr6","chr13","chr15","chr17","chr22")) ## visualize individual SNPs
+```
+
+# Introduce expression information
+
+### T-SNE plots of 11528 FTE cells
+
+```{r}
+sce11528 <- readRDS("../expr/p11528_FTE_SingleCellExp_object.rds")
+dim(sce11528)
+sce11528 <- sce11528[,sce11528$Sample%in% cellinfo$Sample]
+scater::plotTSNE(sce11528, colour_by = "initial.cluster")
+```
+
+These cells are filtered to be EpCAM+ epithelium cells
+
+```{r}
+# logcounts(sce) <- log1p(calculateCPM(sce))
+scater::plotTSNE(sce11528, colour_by = "KRT7", size_by =  "CAPS")
+```
+
+```{r}
+sce11528$p53mut.cov <- cov.sc["chr17:7577515-7577515",]
+sce11528$p53mut.nv <- r["chr17:7577515-7577515",]
+```
+
+Some cells in cluster 11528L.2 and 11528L.3 have p53 mutations.
+
+```{r}
+table(sce11528$p53mut.nv > 0,sce11528$p53mut.cov > 0, sce11528$initial.cluster)
+```
+
+```{r}
+sce11528$tp53_mut <- "no_cov"
+sce11528$tp53_mut[sce11528$p53mut.nv > 0 ] <- "mut"
+sce11528$tp53_mut[sce11528$p53mut.nv == 0 & sce11528$p53mut.cov > 0] <- "no-mut"
+```
+
+### T-SNE plot by the mutation status of p53
+
+```{r}
+plotTSNE(sce11528[, sce11528$tp53_mut!= "no_cov"], colour_by = "tp53_mut", shape_by = "initial.cluster")
+```
+
+```{r}
+plotTSNE(sce11528, colour_by = "p53mut.nv", size_by =  "p53mut.cov")
+```
+
+```{r}
+plotTSNE(sce11528[,sce11528$initial.cluster %in% c("11528L.2","11528L.3")], colour_by = "CUL7", size_by = "p53mut.nv", shape_by = "initial.cluster")
+```
+
+# Calling CNVs from expression data
+
+```{r}
+require(biomaRt) ## for gene coordinates
+mart.obj <- useMart(biomart = "ENSEMBL_MART_ENSEMBL", dataset = 'hsapiens_gene_ensembl', host = "jul2015.archive.ensembl.org")
+ft <- logcounts(sce11528)
+# ref <- log1p(rowMeans(counts(sce11528)[,sce11528$initial.cluster == "11528L.4"])/1e6)
+ref <- rowMeans(counts(sce11528) [,sce11528$initial.cluster %in% c("11528L.4","11528L.3")])
+ref <- log1p(ref/sum(ref) * 1e5)
+keep <- rowSums(ft > 1) > 20
+ref <- ref[keep]
+ft <- ft[keep,]
+```
+
+### Epression CNVs of p53 mutated cells
+
+```{r}
+# gexp.mats <- setGexpMats(ft, refFT, mart.obj, filter=FALSE, scale=T)
+hb$setGexpMats(ft[,sce11528$p53mut.nv > 0], ref, mart.obj, filter=F, scale=T, verbose=F)
+```
+
+
+```{r, fig.width=10, fig.height=3}
+hb$plotGexpProfile(zlim = c(-1.2,1.2), window.size = 201)
+```
+
+They are LOH on chr13, 15, 17 and 22.
+
+```{r, fig.width=10, fig.height=3}
+hb$plotAlleleProfile()
+```
+
+```{r, fig.width=10, fig.height=3}
+hb$plotAlleleProfile(chrs = "chr6")
+```
+
+```{r}
+colnames(ft[,sce11528$p53mut.nv > 0])
+```
+
+## Cells with tp53 mutation but in 11528L.3 clusters
+
+These cells may be misclassified by clustering algorithm.
+
+```{r}
+sce11528$Sample[sce11528$p53mut.nv > 0 & sce11528$initial.cluster == "11528L.3"]
+```
+
+```{r}
+hb4 <- new('HoneyBADGER', name='P11528')
+```
+
+```{r}
+hb4$setGexpMats(ft[,c("11528L-p2-O04","11528L-p1-C16","11528L-p1-N08")], ref, mart.obj, filter=F, scale=T, verbose=TRUE)
+```
+
+```{r, fig.width=10, fig.height=0.7}
+hb4$plotGexpProfile(zlim = c(-1.5,1.5), window.size = 201)
+```
+
+```{r, fig.width=10, fig.height=0.7}
+hb4$setAlleleMats(r.init=r[,c("11528L-p2-O04","11528L-p1-C16","11528L-p1-N08")],
+                 n.sc.init=cov.sc[, c("11528L-p2-O04","11528L-p1-C16","11528L-p1-N08")], 
+                 filter = F,
+                 het.deviance.threshold=0.1, n.cores = 4) # 17 cells with mutated TP53 > 0
+
+hb4$setGeneFactors(txdb) ## map SNPs to genes
+hb4$plotAlleleProfile() ## visualize individual SNPs
+```
+
+```{r}
+sce11528$initial.cluster[sce11528$tp53_mut == "no-mut"]
+```
+
+```{r}
+hb2$setGexpMats(ft[,sce11528$tp53_mut == "no-mut"], ref, mart.obj, filter=F, scale=T, verbose=TRUE)
+```
+
+```{r, fig.width=10, fig.height=3}
+hb2$plotGexpProfile(zlim = c(-1.5,1.5), window.size = 201)
+```
+
+
+```{r}
+hb3$setGexpMats(ft[,sce11528$tp53_mut == "no_cov"], ref, mart.obj, filter=F, scale=T, verbose=TRUE)
+```
+
+```{r, fig.width=10, fig.height=3}
+hb3$plotGexpProfile(zlim = c(-1.5,1.5), window.size = 201)
+```
+
+```{r}
+hb5 <- new('HoneyBADGER', name='P11528')
+```
+
+```{r}
+hb5$setGexpMats(ft[,sce11528$tp53_mut == "no_cov"&sce11528$initial.cluster == "11528L.2"], ref, mart.obj, filter=F, scale=T, verbose=TRUE)
+```
+
+```{r, fig.width=10, fig.height=3}
+hb5$plotGexpProfile(zlim = c(-1.2,1.2), window.size = 201)
+```
+
+
+## 11528L.3 no coverage
+
+```{r, fig.width=10, fig.height=3}
+hb5 <- new('HoneyBADGER', name='P11528')
+hb5$setGexpMats(ft[,sce11528$tp53_mut == "no_cov"&sce11528$initial.cluster == "11528L.3"], ref, mart.obj, filter=F, scale=T, verbose=F)
+hb5$plotGexpProfile(zlim = c(-1.2,1.2), window.size = 201)
+```
+
+```{r}
+gexp.mats <- setGexpMats(ft, ref, mart.obj, filter=FALSE, scale=T)
+gexp.plot.all <- plotGexpProfile(gexp.mats$gexp.norm, gexp.mats$genes,window.size = 201,zlim = c(-1.2, 1.2))
+```
+
+An example with chr6p amp
+
+```{r}
+plot(1:396,gexp.plot.all$tlsmooth[[6]][,"11528L-p1-O08"])
+```
+
+An example with no chr6p amp
+
+```{r}
+plot(1:396,gexp.plot.all$tlsmooth[[6]][,"11528L-P1-C01"])
+```
+
+### Score cells based on the chr6p amplification
+
+100 = amplified
+
+0 = no amplified
+
+```{r}
+hist(colSums(gexp.plot.all$tlsmooth[[6]][100:200,] > 0.1),30)
+```
+
+48 cells with strong amp signal at chr6p:
+
+```{r, fig.height=3, fig.width=10}
+gexp.mats <- setGexpMats(ft[,names(which(colSums(gexp.plot.all$tlsmooth[[6]][100:200,] > 0.1) > 50))], ref, mart.obj, filter=FALSE, scale=T)
+gexp.plot <- plotGexpProfile(gexp.mats$gexp.norm, gexp.mats$genes,window.size = 201,zlim = c(-1.2, 1.2))
+```
+
+161 cells without signals:
+
+```{r, fig.height=3, fig.width=10}
+gexp.mats <- setGexpMats(ft[,names(which(colSums(gexp.plot.all$tlsmooth[[6]][100:200,]> 0.1) < 10))], ref, mart.obj, filter=FALSE, scale=T)
+gexp.plot <- plotGexpProfile(gexp.mats$gexp.norm, gexp.mats$genes,window.size = 201,zlim = c(-1.2, 1.2))
+```
+
+15 cells with dodge signals
+
+```{r, fig.height=1.2, fig.width=10}
+gexp.mats <- setGexpMats(ft[,names(which(colSums(gexp.plot.all$tlsmooth[[6]][100:200,] > 0.1) >= 10 & colSums(gexp.plot.all$tlsmooth[[6]][100:200,] > 0.1) <=50))], ref, mart.obj, filter=FALSE, scale=T)
+gexp.plot <- plotGexpProfile(gexp.mats$gexp.norm, gexp.mats$genes,window.size = 201,zlim = c(-1.2, 1.2))
+```
+
+```{r}
+sce11528$chr6pamp <- colSums(gexp.plot.all$tlsmooth[[6]][100:200,] > 0.1)
+table(sce11528$chr6pamp, sce11528$initial.cluster)
+```
+
+```{r, fig.height=6}
+scater::plotTSNE(sce11528, colour_by = "chr6pamp", shape_by = "tp53_mut")
+```
+
+```{r, fig.height=6}
+# jpeg(filename = "../plots/20180704HoneyBadger11528/tp53mut_ampChr6_11528FTE.jpg", res = 150,width = 10, height = 8, units = "in")
+# scater::plotTSNE(sce11528, colour_by = "chr6pamp", shape_by = "tp53_mut")
+# dev.off()
+```
+
+```{r}
+scater::plotPCA(sce11528, colour_by = "chr6pamp", shape_by = "tp53_mut")
+```
+
+```{r}
+# jpeg(filename = "../plots/20180704HoneyBadger11528/tp53mut_ampChr6_11528FTE2.jpg", res = 150,width = 10, height = 8, units = "in")
+# scater::plotTSNE(sce11528, size_by = "chr6pamp", colour_by = "tp53_mut")
+# dev.off()
+```
+
+```{r}
+ggplot(data.frame(sce11528@colData), aes(x = initial.cluster, y = chr6pamp)) +  geom_point(aes(col = tp53_mut),position=position_jitterdodge()) + theme_classic()
+```
+
+##### Can we find mutations with chr6 alteration and mutations
+
+```{r}
+save.image("~/OneDrive - OnTheHub - The University of Oxford/Project scRNAseq analysis/LOH/R/20180721P11528_after_chr6LOH.RData")
+```
+
+
