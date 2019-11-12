@@ -1,0 +1,818 @@
+---
+title: "Session 4 Effects of culturing"
+author: "Zhiyuan Hu"
+date: "04/10/2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Read data
+
+First we read in the processed dataset.
+
+```{r read data}
+suppressPackageStartupMessages(library(SingleCellExperiment))
+suppressPackageStartupMessages(library(scater))
+suppressPackageStartupMessages(library(edgeR))
+suppressPackageStartupMessages(library(limma))
+# load("../RData/20180725_allFT_Clincluster_12clusters.RData")
+sceset <- readRDS("../rds/20180725_allFT_Clincluster_12clusters_sceset.rds")
+secretory <- readRDS("../rds/20180910Fresh_secretory_5_7clusters_clincluster.rds")
+# dim(sceset)
+```
+
+
+```{r}
+# secretory <- sceset[,sceset$final.clusters %in% c(8,9,10) & sceset$source == "Fresh" & sceset$Patient != "15066L"] # 
+# secretory <- secretory[,logcounts(secretory)["KRT7",] > 2 & 
+#                            logcounts(secretory)["EPCAM",] > 2 & 
+#                            logcounts(secretory)["PTPRC",] == 0 &
+#                            logcounts(secretory)["CCDC17",] < 1 ]
+FTE <- sceset[, !(sceset$final.clusters %in% c(4,6)) & sceset$Patient != "15066L"] 
+FTE <- FTE[,logcounts(FTE)["EPCAM",] > 2 & logcounts(FTE)["PTPRC",] == 0]
+```
+
+
+```{r}
+plotTSNE(FTE, colour_by = "source")
+```
+
+```{r}
+plotTSNE(FTE, colour_by = "final.clusters")
+```
+
+## Extract 11553 & 15072
+
+```{r}
+P11553 <- FTE[,FTE$Patient2 == "11553"]
+P15072 <- FTE[,FTE$Patient2 == "15072"]
+P15072$source[P15072$source == "2-day cultured"] <- "6-day cultured"
+p1 <- plotTSNE(P11553, colour_by = "source")
+p2 <- plotTSNE(P11553, colour_by = "final.clusters")
+p3 <- plotTSNE(P15072, colour_by = "source")
+p4 <- plotTSNE(P15072, colour_by = "final.clusters")
+cowplot::plot_grid(p1,p2,p3,p4)
+```
+
+## P11553 & P15072 secretory
+
+```{r}
+P11553 <- FTE[,FTE$Patient2 %in% c("11553","15072")]
+P11553 <- P11553[, !(P11553$final.clusters %in% c(5,11))]
+```
+
+```{r}
+# P11553 <- cbind(P11553, P15072)
+P11553 <- P11553[,logcounts(P11553)["CAPS",] < 5]
+P11553$source <- gsub(P11553$source, pattern = " cultured", replacement = "")
+P11553$source <- gsub(P11553$source, pattern = "2-day", replacement = "Long")
+P11553$source <- gsub(P11553$source, pattern = "6-day", replacement = "Long")
+P11553$source <- factor(P11553$source, levels = c("Fresh","O.N.", "Long"))
+table(P11553$source)
+```
+
+
+
+
+```{r}
+saveRDS(P11553, "../rds/20181011_culture_11553n15072_sceset.rds", compress = T)
+table(P11553$Patient2)
+```
+
+
+### DE analysis P11553 secretory
+
+```{r}
+matrix <- expm1(logcounts(P11553))
+keep <- rowSums(matrix > 1) > 10
+sum(keep)
+```
+
+```{r}
+dge <- edgeR::DGEList(counts = matrix[keep,]) # make a edgeR object
+rm(matrix,keep)
+design <- model.matrix(~  0 + source + Patient2, data = P11553@colData)  # Use 0 because we do not need intercept for this linear model
+colnames(design)
+```
+
+```{r}
+v <- voom(dge, design, plot = TRUE)
+fit <- lmFit(v, design) # Linear Model for Series of Arrays
+```
+
+### TopTable
+
+```{r}
+cont.matrix <- makeContrasts("sourceO.N.-sourceFresh",
+                             "sourceLong-sourceFresh",
+                             "sourceLong-sourceO.N.",
+                             levels = design)
+fit2 <- contrasts.fit(fit, cont.matrix) # Compute Contrasts from Linear Model Fit
+fit2 <- eBayes(fit2) #Empirical Bayes Statistics for Differential Expression
+
+rls1 <- topTable(fit2, n = Inf, coef = 1, sort = "logFC", lfc = 1, p = 0.05)
+rls1$gene <- rownames(rls1)
+fresh_up_ON <- rls1[rls1$logFC > 1,] 
+fresh_down_ON <- rls1[rls1$logFC < -1,] 
+
+rls2 <- topTable(fit2, n = Inf, coef = 2, sort = "logFC", lfc = 1, p = 0.05 )
+rls2$gene <- rownames(rls2)
+fresh_up_long <- rls2[rls2$logFC > 1,] 
+fresh_down_long <- rls2[rls2$logFC < -1,] 
+
+rls3 <- topTable(fit2, n = Inf, coef = 3, sort = "logFC", lfc = 1, p = 0.05 )
+rls3$gene <- rownames(rls3)
+ON_up_long <- rls3[rls3$logFC > 1,] 
+ON_down_long <- rls3[rls3$logFC < -1,] 
+```
+
+
+
+```{r}
+sum(fresh_up_ON$gene %in% fresh_up_long$gene)
+```
+
+```{r}
+plotExpression(P11553, features = head(fresh_up_long$gene,12), x = "source", ncol = 3, colour_by = "Patient2")
+```
+
+
+```{r}
+plotExpression(P11553, features = head(fresh_down_ON$gene[fresh_down_ON$gene %in% ON_down_long$gene],15), x = "source", ncol = 3, colour_by = "Patient2")
+```
+
+CRISP3 is expressed highly in protein atlas.
+NR4A1 is expressed in fallopian tube. High Expression of Orphan Nuclear Receptor NR4A1 in a Subset of Ovarian Tumors with Worse Outcome (https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5154956/)
+
+SERPING1 is special. It is rarely expressed in normal FT but expressed in OvCa.
+
+```{r}
+plotExpression(P11553, features = c("PTGS1","SERPING1"), x = "source", colour_by = "Patient2")
+```
+
+```{r}
+length(unique(c(rls1$gene, rls2$gene, rls3$gene)))
+```
+
+4071 genes are DE in this process.
+
+
+"sourceO.N.-sourceFresh",
+                             "sourceLong-sourceFresh",
+                             "sourceLong-sourceO.N.",
+
+```{r}
+rls1$group1 <- "Fresh"
+rls1$group2 <- "Overnight"
+rls1 <- rls1[order(rls1$logFC, decreasing = T),]
+rls2$group1 <- "Fresh"
+rls2$group2 <- "Long"
+rls2 <- rls2[order(rls2$logFC, decreasing = T),]
+rls3$group1 <- "Overnight"
+rls3$group2 <- "Long"
+rls3 <- rls3[order(rls3$logFC, decreasing = T),]
+rls <- rbind(rls1, rls2, rls3)
+head(rls)
+```
+
+
+### GORilla
+
+```{r}
+# write.table(rownames(dge), quote = F, sep = "\n", file = "../GOrilla input/20180916_bg_genes.txt", row.names = F, col.names = F)
+# write.table(fresh_up_ON$gene, quote = F, sep = "\n", file = "../GOrilla input/20180916_fresh_up_ON_DEGs.txt", row.names = F, col.names = F)
+# write.table(fresh_down_ON$gene, quote = F, sep = "\n", file = "../GOrilla input/20180916_fresh_down_ON_DEGs.txt", row.names = F, col.names = F)
+# write.table(fresh_up_long$gene, quote = F, sep = "\n", file = "../GOrilla input/20180916_fresh_up_long_DEGs.txt", row.names = F, col.names = F)
+# write.table(fresh_down_long$gene, quote = F, sep = "\n", file = "../GOrilla input/20180916_fresh_down_long_DEGs.txt", row.names = F, col.names = F)
+# write.table(ON_down_long$gene, quote = F, sep = "\n", file = "../GOrilla input/20180916_ON_down_long_DEGs.txt", row.names = F, col.names = F)
+# write.table(ON_up_long$gene, quote = F, sep = "\n", file = "../GOrilla input/20180916_ON_up_long_DEGs.txt", row.names = F, col.names = F)
+# write.table(fresh_up_long$gene, quote = F, sep = "\n", file = "../GOrilla input/20180916_fresh_up_ON_DEGs.txt", row.names = F, col.names = F)
+# write.table(fresh_down_long$gene, quote = F, sep = "\n", file = "../GOrilla input/20180916_fresh_down_ON_DEGs.txt", row.names = F, col.names = F)
+```
+
+
+
+### Venn plots
+
+```{r}
+dim(fresh_up_ON)
+dim(fresh_down_ON)
+dim(fresh_up_long)
+dim(fresh_down_long)
+dim(ON_up_long)
+dim(ON_down_long)
+```
+
+```{r}
+tmp <- venn::venn(list(fUPon=fresh_up_ON$gene, 
+                       fUPl=fresh_up_long$gene,
+                       onUPl= ON_up_long$gene),
+                  ilab=TRUE, zcolor = "style")
+# attr(tmp, "intersections")
+```
+
+```{r}
+tmp <- venn::venn(list(fDOWNo = fresh_down_ON$gene,
+                       fDownl = fresh_down_long$gene,
+                       oDOWNl= ON_down_long$gene), 
+                  ilab=TRUE,
+                  zcolor = "style")
+# attr(tmp, "intersections")
+```
+
+#### Inconsistent change
+
+103 genes first downregulated then upregulated.
+
+```{r}
+tmp <- venn::venn(list(fresh_down_ON = fresh_down_ON$gene,
+                       ON_up_long= ON_up_long$gene), 
+                  ilab=TRUE,
+                  zcolor = "style")
+```
+
+```{r}
+tmp2 <- attr(tmp, "intersections")
+tmp2$`fresh_down_ON:ON_up_long`[1:10]
+```
+
+
+```{r}
+plotExpression(P11553, features = head(tmp2$`fresh_down_ON:ON_up_long`), x = "source", ncol = 2, colour_by = "Patient2")
+```
+
+
+```{r}
+p1 <- plotTSNE(P11553, colour_by = c("GAS6"))
+p2 <- plotTSNE(P11553, colour_by = c("CRIP2"))
+p3 <- plotTSNE(P11553, colour_by = c("FOS"))
+p4 <- plotTSNE(P11553, colour_by = c("UCP2"))
+cowplot::plot_grid(p1,p2,p3,p4, ncol = 2)
+```
+
+
+```{r}
+# write.table(tmp2$`fresh_down_ON:ON_up_long`, quote = F, sep = "\n", file = "../GOrilla input/20180916fresh_down_ON:ON_up_long.txt", row.names = F, col.names = F)
+```
+
+217 genes first upregulated then downregulated
+
+```{r}
+tmp <- venn::venn(list(fresh_up_ON = fresh_up_ON$gene,
+                       ON_down_long= ON_down_long$gene), 
+                  ilab=TRUE,
+                  zcolor = "style")
+```
+
+```{r}
+tmp2 <- attr(tmp, "intersections")
+tmp2$`fresh_up_ON:ON_down_long`[1:20]
+```
+
+```{r}
+# write.table(tmp2$`fresh_up_ON:ON_down_long`, quote = F, sep = "\n", file = "../GOrilla input/20180916fresh_up_ON:ON_down_long.txt", row.names = F, col.names = F)
+```
+
+
+## After Gorilla
+
+p-value < 3E-10
+
+```{r}
+GO_fUPo <- read.delim("../Gorilla output/20180916/20180916fresh up on.txt", header = T, sep = "\t", as.is = T)
+GO_fUPo <- GO_fUPo[GO_fUPo$FDR.q.value < 0.05,]
+# NADH dehydrogenase complex assembly
+# cell junction assembly
+
+GO_fDOWNo <- read.delim("../Gorilla output/20180916/20180916fresh down on.txt", header = T, sep = "\t", as.is = T)
+GO_fDOWNo <- GO_fDOWNo[GO_fDOWNo$FDR.q.value < 0.05,]
+
+# cytokine-mediated signaling pathway
+# humoral immune response
+# response to steroid hormone/inflammatory response
+# cell communication
+
+# regulation of cell activation
+# regulation of cell motility
+# negative regulation of cell cycle
+
+GO_oUPl <- read.delim("../Gorilla output/20180916/20180916on up long.txt", header = T, sep = "\t", as.is = T)
+GO_oUPl <- GO_oUPl[GO_oUPl$FDR.q.value < 0.05,]
+
+GO_oDOWNl <- read.delim("../Gorilla output/20180916/20180916on down long.txt", header = T, sep = "\t", as.is = T)
+GO_oDOWNl <- GO_oDOWNl[GO_oDOWNl$FDR.q.value < 0.05,]
+
+GO_fUDl <- read.delim("../Gorilla output/20180916/20180916fresh up down long.txt", header = T, sep = "\t", as.is = T)
+GO_fUDl <- GO_fUDl[GO_fUDl$FDR.q.value < 0.05,]
+# RNA processing
+
+GO_fDUl <- read.delim("../Gorilla output/20180916/20180916fresh down up long.txt", header = T, sep = "\t", as.is = T)
+GO_fDUl <- GO_fDUl[GO_fDUl$FDR.q.value < 0.05,]
+# fatty acid metabolic process
+```
+
+
+### Heatmap
+
+Choose some GOs for heatmap
+
+```{r}
+P11553$source <- gsub(pattern = "O.N.", replacement = "Overnight", x = P11553$source)
+P11553$source <- gsub(pattern = "Long", replacement = "Long-term", x = P11553$source)
+P11553$source <- factor(P11553$source,levels = c("Fresh", "Overnight", "Long-term"))
+```
+
+#### Fatty acid
+
+```{r}
+# library(tidyverse)
+gos <- GO_fDUl[GO_fDUl$Description == "fatty acid metabolic process",]
+
+go_genes <- gos$Genes
+go_genes <- unlist(strsplit(go_genes , split = ", "))
+go_genes <- unique(go_genes)
+go_genes <- go_genes[grep(" - ", go_genes )]
+go_genes <- sapply(go_genes, function(x) return(unlist(strsplit(x, "  -  "))[1]))
+names(go_genes) <- NULL
+go_genes <- unlist(go_genes)
+
+go_genes <- gsub(pattern = "[[]", replacement = "", x = go_genes)
+# go_genes <- unique(go_genes)
+go_genes <- data.frame(gene = go_genes,
+                       GO = "fatty acid metabolic process" )
+go_genes$logFC1 <- fresh_down_ON$logFC[match(go_genes$gene, fresh_down_ON$gene)]
+go_genes$logFC2 <- ON_up_long$logFC[match(go_genes$gene, ON_up_long$gene)]
+go_genes <- go_genes[!is.na(go_genes$logFC1), ]
+go_genes <- go_genes[!is.na(go_genes$logFC2), ]
+go_genes <- go_genes[order(abs(go_genes$logFC1), decreasing = T),]
+head(go_genes)
+
+data.plot <- logcounts(P11553)[match(go_genes$gene, rownames(P11553)), ]
+
+colanno <- data.frame(source = P11553$source)
+rownames(colanno) <- colnames(data.plot)
+colanno <- colanno[order(colanno$source, decreasing = F),, drop = F]
+
+data.plot <- data.plot[,rownames(colanno)]
+data.plot <- data.plot[rowSums(data.plot > 0.5) >= 5,]
+data.plot <- t(scale(t(data.plot), center = T, scale = T))
+data.plot <- Seurat::MinMax(data.plot , min = -2.5, max = 2.5)
+data.plot[1:10,1:10]
+go_genes <- go_genes[go_genes$gene %in% rownames(data.plot),, drop = F]
+
+pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+                   show_rownames = T, 
+                   show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+                   cluster_rows = F, cluster_cols = F,annotation_col = colanno)
+```
+
+```{r}
+# tiff("../manuscript_plots/20180918Figure3_fattyAcid.tiff", res = 200, width = 8,height = 8, units = "in")
+# pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+#                    show_rownames = T, 
+#                    show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+#                    cluster_rows = F, cluster_cols = F,annotation_col = colanno)
+# dev.off()
+```
+
+#### lipid metabolic process
+
+
+```{r}
+gos <- GO_fDUl[GO_fDUl$Description == "lipid metabolic process",]
+go_genes <- gos$Genes
+go_genes <- unlist(strsplit(go_genes , split = ", "))
+go_genes <- unique(go_genes)
+go_genes <- go_genes[grep(" - ", go_genes )]
+go_genes <- sapply(go_genes, function(x) return(unlist(strsplit(x, "  -  "))[1]))
+names(go_genes) <- NULL
+go_genes <- unlist(go_genes)
+
+go_genes <- gsub(pattern = "[[]", replacement = "", x = go_genes)
+go_genes <- data.frame(gene = go_genes,
+                       GO = "lipid metabolic process" )
+go_genes$logFC1 <- fresh_down_ON$logFC[match(go_genes$gene, fresh_down_ON$gene)]
+go_genes$logFC2 <- ON_up_long$logFC[match(go_genes$gene, ON_up_long$gene)]
+go_genes <- go_genes[!is.na(go_genes$logFC1), ]
+# go_genes <- go_genes[!is.na(go_genes$logFC2), ]
+go_genes <- go_genes[order(abs(go_genes$logFC1), decreasing = T),]
+head(go_genes)
+
+data.plot <- logcounts(P11553)[match(go_genes$gene, rownames(P11553)), ]
+
+data.plot <- data.plot[,rownames(colanno)]
+data.plot <- data.plot[rowSums(data.plot > 0.5) >= 5,]
+data.plot <- t(scale(t(data.plot), center = T, scale = T))
+data.plot <- Seurat::MinMax(data.plot , min = -2.5, max = 2.5)
+# data.plot[1:10,1:10]
+go_genes <- go_genes[go_genes$gene %in% rownames(data.plot),, drop = F]
+
+pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+                   show_rownames = T, 
+                   show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+                   cluster_rows = F, cluster_cols = F)
+```
+
+```{r}
+# tiff("../manuscript_plots/20180918Figure3_lipidmetabolic.tiff", res = 200, width = 8,height = 8, units = "in")
+# pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+#                    show_rownames = T,
+#                    show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+#                    cluster_rows = F, cluster_cols = F)
+# dev.off()
+```
+
+
+#### NADH dehydrogenase complex assembly
+
+GO_fUPo
+
+```{r}
+gos <- GO_fUPo[GO_fUPo$Description == "NADH dehydrogenase complex assembly",]
+go_genes <- gos$Genes
+go_genes <- unlist(strsplit(go_genes , split = ", "))
+go_genes <- unique(go_genes)
+go_genes <- go_genes[grep(" - ", go_genes )]
+go_genes <- sapply(go_genes, function(x) return(unlist(strsplit(x, "  -  "))[1]))
+names(go_genes) <- NULL
+go_genes <- unlist(go_genes)
+
+go_genes <- gsub(pattern = "[[]", replacement = "", x = go_genes)
+go_genes <- data.frame(gene = go_genes,
+                       GO = "NADH dehydrogenase complex assembly" )
+go_genes$logFC1 <- fresh_up_ON$logFC[match(go_genes$gene, fresh_up_ON$gene)]
+# go_genes$logFC2 <- ON_up_long$logFC[match(go_genes$gene, ON_up_long$gene)]
+go_genes <- go_genes[!is.na(go_genes$logFC1), ]
+# go_genes <- go_genes[!is.na(go_genes$logFC2), ]
+go_genes <- go_genes[order(abs(go_genes$logFC1), decreasing = T),]
+head(go_genes)
+
+data.plot <- logcounts(P11553)[match(go_genes$gene, rownames(P11553)), ]
+
+data.plot <- data.plot[,rownames(colanno)]
+data.plot <- data.plot[rowSums(data.plot > 0.5) >= 5,]
+data.plot <- t(scale(t(data.plot), center = T, scale = T))
+data.plot <- Seurat::MinMax(data.plot , min = -2.5, max = 2.5)
+# data.plot[1:10,1:10]
+go_genes <- go_genes[go_genes$gene %in% rownames(data.plot),, drop = F]
+
+pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+                   show_rownames = T, 
+                   show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+                   cluster_rows = F, cluster_cols = F)
+```
+
+```{r}
+# tiff("../manuscript_plots/20180918Figure3_fattyNADH.tiff", res = 200, width = 8,height = 8, units = "in")
+# pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+#                    show_rownames = T, 
+#                    show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+#                    cluster_rows = F, cluster_cols = F)
+# dev.off()
+```
+
+
+#### cell junction assembly
+
+GO_fUPo
+
+```{r}
+gos <- GO_fUPo[GO_fUPo$Description == "cell junction assembly",]
+go_genes <- gos$Genes
+go_genes <- unlist(strsplit(go_genes , split = ", "))
+go_genes <- unique(go_genes)
+go_genes <- go_genes[grep(" - ", go_genes )]
+go_genes <- sapply(go_genes, function(x) return(unlist(strsplit(x, "  -  "))[1]))
+names(go_genes) <- NULL
+go_genes <- unlist(go_genes)
+
+go_genes <- gsub(pattern = "[[]", replacement = "", x = go_genes)
+go_genes <- data.frame(gene = go_genes,
+                       GO = "cell junction assembly" )
+go_genes$logFC1 <- fresh_up_ON$logFC[match(go_genes$gene, fresh_up_ON$gene)]
+# go_genes$logFC2 <- ON_up_long$logFC[match(go_genes$gene, ON_up_long$gene)]
+go_genes <- go_genes[!is.na(go_genes$logFC1), ]
+# go_genes <- go_genes[!is.na(go_genes$logFC2), ]
+go_genes <- go_genes[order(abs(go_genes$logFC1), decreasing = T),]
+head(go_genes)
+
+data.plot <- logcounts(P11553)[match(go_genes$gene, rownames(P11553)), ]
+
+data.plot <- data.plot[,rownames(colanno)]
+data.plot <- data.plot[rowSums(data.plot > 0.5) >= 5,]
+data.plot <- t(scale(t(data.plot), center = T, scale = T))
+data.plot <- Seurat::MinMax(data.plot , min = -2.5, max = 2.5)
+# data.plot[1:10,1:10]
+go_genes <- go_genes[go_genes$gene %in% rownames(data.plot),, drop = F]
+
+pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+                   show_rownames = T, 
+                   show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+                   cluster_rows = F, cluster_cols = F)
+```
+
+```{r}
+# tiff("../manuscript_plots/20180918Figure3_cell_junction.tiff", res = 200, width = 8,height = 8, units = "in")
+# pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+#                    show_rownames = T, 
+#                    show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+#                    cluster_rows = F, cluster_cols = F)
+# dev.off()
+```
+
+#### negative regulation of cell cycle
+
+```{r}
+gos <- GO_fDOWNo[GO_fDOWNo$Description == "negative regulation of cell cycle",]
+go_genes <- gos$Genes
+go_genes <- unlist(strsplit(go_genes , split = ", "))
+go_genes <- unique(go_genes)
+go_genes <- go_genes[grep(" - ", go_genes )]
+go_genes <- sapply(go_genes, function(x) return(unlist(strsplit(x, "  -  "))[1]))
+names(go_genes) <- NULL
+go_genes <- unlist(go_genes)
+
+go_genes <- gsub(pattern = "[[]", replacement = "", x = go_genes)
+go_genes <- data.frame(gene = go_genes,
+                       GO = "negative regulation of cell cycle" )
+go_genes$logFC1 <- fresh_down_ON$logFC[match(go_genes$gene, fresh_down_ON$gene)]
+# go_genes$logFC2 <- ON_up_long$logFC[match(go_genes$gene, ON_up_long$gene)]
+go_genes <- go_genes[!is.na(go_genes$logFC1), ]
+# go_genes <- go_genes[!is.na(go_genes$logFC2), ]
+go_genes <- go_genes[order(abs(go_genes$logFC1), decreasing = T),]
+head(go_genes)
+
+data.plot <- logcounts(P11553)[match(go_genes$gene, rownames(P11553)), ]
+
+data.plot <- data.plot[,rownames(colanno)]
+data.plot <- data.plot[rowSums(data.plot > 0.5) >= 5,]
+data.plot <- t(scale(t(data.plot), center = T, scale = T))
+data.plot <- Seurat::MinMax(data.plot , min = -2.5, max = 2.5)
+# data.plot[1:10,1:10]
+go_genes <- go_genes[go_genes$gene %in% rownames(data.plot),, drop = F]
+
+pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+                   show_rownames = T, 
+                   show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+                   cluster_rows = F, cluster_cols = F)
+```
+
+```{r}
+# tiff("../manuscript_plots/20180918Figure3_cell_cycle.tiff", res = 200, width = 8,height = 8, units = "in")
+# pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+#                    show_rownames = T, 
+#                    show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+#                    cluster_rows = F, cluster_cols = F)
+# dev.off()
+```
+
+#### Stress
+
+```{r}
+gos <- GO_fDOWNo[GO_fDOWNo$Description == "response to stress",]
+
+go_genes <- gos$Genes
+go_genes <- unlist(strsplit(go_genes , split = ", "))
+go_genes <- unique(go_genes)
+go_genes <- go_genes[grep(" - ", go_genes )]
+go_genes <- sapply(go_genes, function(x) return(unlist(strsplit(x, "  -  "))[1]))
+names(go_genes) <- NULL
+go_genes <- unlist(go_genes)
+
+go_genes <- gsub(pattern = "[[]", replacement = "", x = go_genes)
+go_genes <- data.frame(gene = go_genes,  GO = "response to stress" )
+
+go_genes$logFC1 <- fresh_down_ON$logFC[match(go_genes$gene, fresh_down_ON$gene)]
+# go_genes$logFC2 <- ON_up_long$logFC[match(go_genes$gene, ON_up_long$gene)]
+go_genes <- go_genes[!is.na(go_genes$logFC1), ]
+go_genes <- go_genes[order(abs(go_genes$logFC1), decreasing = T),]
+go_genes <- go_genes[go_genes$logFC1 < -2, ]
+
+data.plot <- logcounts(P11553)[match(go_genes$gene, rownames(P11553)), ]
+
+data.plot <- data.plot[,rownames(colanno)]
+data.plot <- data.plot[rowSums(data.plot > 0.5) >= 5,]
+data.plot <- t(scale(t(data.plot), center = T, scale = T))
+data.plot <- Seurat::MinMax(data.plot , min = -2.5, max = 2.5)
+# data.plot[1:10,1:10]
+go_genes <- go_genes[go_genes$gene %in% rownames(data.plot),, drop = F]
+
+
+pheatmap::pheatmap(data.plot,  color = my_colours,
+                   show_rownames = T, 
+                   show_colnames = F, cellwidth = 0.3,cellheight = 6,fontsize_row = 6,
+                   cluster_rows = F, cluster_cols = F
+                   # annotation_col = colanno
+                   )
+```
+
+```{r}
+# tiff("../manuscript_plots/20180918Figure3_stress_2.tiff", res = 200, width = 8,height = 8, units = "in")
+# pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+#                    show_rownames = T, 
+#                    show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+#                    cluster_rows = F, cluster_cols = F)
+# dev.off()
+```
+
+#### Immune
+
+```{r}
+gos <- GO_fDOWNo[GO_fDOWNo$Description == "immune response",]
+
+go_genes <- gos$Genes
+go_genes <- unlist(strsplit(go_genes , split = ", "))
+go_genes <- unique(go_genes)
+go_genes <- go_genes[grep(" - ", go_genes )]
+go_genes <- sapply(go_genes, function(x) return(unlist(strsplit(x, "  -  "))[1]))
+names(go_genes) <- NULL
+go_genes <- unlist(go_genes)
+
+go_genes <- gsub(pattern = "[[]", replacement = "", x = go_genes)
+# go_genes <- unique(go_genes)
+go_genes <- data.frame(gene = go_genes, GO = "immune response" )
+
+go_genes$logFC1 <- fresh_down_ON$logFC[match(go_genes$gene, fresh_down_ON$gene)]
+# go_genes$logFC2 <- ON_up_long$logFC[match(go_genes$gene, ON_up_long$gene)]
+go_genes <- go_genes[!is.na(go_genes$logFC1), ]
+go_genes <- go_genes[order(abs(go_genes$logFC1), decreasing = T),]
+head(go_genes)
+dim(go_genes)
+
+data.plot <- logcounts(P11553)[match(go_genes$gene, rownames(P11553)), ]
+
+data.plot <- data.plot[,rownames(colanno)]
+data.plot <- data.plot[rowSums(data.plot > 0.5) >= 5,]
+data.plot <- t(scale(t(data.plot), center = T, scale = T))
+data.plot <- Seurat::MinMax(data.plot , min = -2.5, max = 2.5)
+data.plot[1:10,1:10]
+go_genes <- go_genes[go_genes$gene %in% rownames(data.plot),, drop = F]
+
+
+pheatmap::pheatmap(data.plot,  color = my_colours,
+                   show_rownames = T, 
+                   show_colnames = F, cellwidth = 0.3,cellheight = 6,fontsize_row = 6,
+                   cluster_rows = F, cluster_cols = F,annotation_col = colanno)
+```
+
+```{r}
+# tiff("../manuscript_plots/20180918Figure3_immune.tiff", res = 200, width = 8,height = 8, units = "in")
+# pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+#                    show_rownames = T, 
+#                    show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+#                    cluster_rows = F, cluster_cols = F)
+# dev.off()
+```
+
+#### RNA processing
+
+fUDL
+
+```{r}
+gos <- GO_fUDl[GO_fUDl$Description == "RNA processing",]
+
+go_genes <- gos$Genes
+go_genes <- unlist(strsplit(go_genes , split = ", "))
+go_genes <- unique(go_genes)
+go_genes <- go_genes[grep(" - ", go_genes )]
+go_genes <- sapply(go_genes, function(x) return(unlist(strsplit(x, "  -  "))[1]))
+names(go_genes) <- NULL
+go_genes <- unlist(go_genes)
+
+go_genes <- gsub(pattern = "[[]", replacement = "", x = go_genes)
+go_genes <- data.frame(gene = go_genes, GO = "RNA processing" )
+
+go_genes$logFC1 <- fresh_up_ON$logFC[match(go_genes$gene, fresh_up_ON$gene)]
+go_genes$logFC2 <- ON_down_long$logFC[match(go_genes$gene, ON_down_long$gene)]
+go_genes <- go_genes[!is.na(go_genes$logFC1), ]
+go_genes <- go_genes[!is.na(go_genes$logFC2), ]
+go_genes <- go_genes[order(abs(go_genes$logFC1), decreasing = T),]
+dim(go_genes)
+
+go_genes <- go_genes[go_genes$logFC1 > 1.5,]
+data.plot <- logcounts(P11553)[match(go_genes$gene, rownames(P11553)), ]
+
+data.plot <- data.plot[,rownames(colanno)]
+data.plot <- data.plot[rowSums(data.plot > 0.5) >= 5,]
+data.plot <- t(scale(t(data.plot), center = T, scale = T))
+data.plot <- Seurat::MinMax(data.plot , min = -2.5, max = 2.5)
+go_genes <- go_genes[go_genes$gene %in% rownames(data.plot),, drop = F]
+
+pheatmap::pheatmap(data.plot,  color = my_colours,
+                   show_rownames = T, 
+                   show_colnames = F, cellwidth = 0.3,cellheight = 6,fontsize_row = 6,
+                   cluster_rows = F, cluster_cols = F,annotation_col = colanno)
+```
+
+```{r}
+# tiff("../manuscript_plots/20180918Figure3_RNA.tiff", res = 200, width = 8,height = 8, units = "in")
+# pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+#                    show_rownames = T, 
+#                    show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+#                    cluster_rows = F, cluster_cols = F)
+# dev.off()
+```
+
+#### cell activation
+
+oUPl
+
+```{r}
+gos <- GO_oUPl[GO_oUPl$Description == "cell activation",]
+
+go_genes <- gos$Genes
+go_genes <- unlist(strsplit(go_genes , split = ", "))
+go_genes <- unique(go_genes)
+go_genes <- go_genes[grep(" - ", go_genes )]
+go_genes <- sapply(go_genes, function(x) return(unlist(strsplit(x, "  -  "))[1]))
+names(go_genes) <- NULL
+go_genes <- unlist(go_genes)
+
+go_genes <- gsub(pattern = "[[]", replacement = "", x = go_genes)
+go_genes <- data.frame(gene = go_genes, GO = "cell activation" )
+
+go_genes$logFC1 <- ON_up_long$logFC[match(go_genes$gene, ON_up_long$gene)]
+# go_genes$logFC2 <- ON_down_long$logFC[match(go_genes$gene, ON_down_long$gene)]
+go_genes <- go_genes[!is.na(go_genes$logFC1), ]
+# go_genes <- go_genes[!is.na(go_genes$logFC2), ]
+go_genes <- go_genes[order(abs(go_genes$logFC1), decreasing = T),]
+head(go_genes)
+dim(go_genes)
+go_genes <- go_genes[go_genes$logFC1 > 2,]
+data.plot <- logcounts(P11553)[match(go_genes$gene, rownames(P11553)), ]
+
+data.plot <- data.plot[,rownames(colanno)]
+data.plot <- data.plot[rowSums(data.plot > 0.5) >= 5,]
+data.plot <- t(scale(t(data.plot), center = T, scale = T))
+data.plot <- Seurat::MinMax(data.plot , min = -2.5, max = 2.5)
+go_genes <- go_genes[go_genes$gene %in% rownames(data.plot),, drop = F]
+
+pheatmap::pheatmap(data.plot,  color = my_colours,
+                   show_rownames = T, 
+                   show_colnames = F, cellwidth = 0.3,cellheight = 6,fontsize_row = 6,
+                   cluster_rows = F, cluster_cols = F,annotation_col = colanno)
+```
+
+```{r}
+# tiff("../manuscript_plots/20180918Figure3_cellActivation.tiff", res = 200, width = 8,height = 8, units = "in")
+# pheatmap::pheatmap(data.plot[as.character(go_genes$gene),],  color = my_colours,
+#                    show_rownames = T, 
+#                    show_colnames = F, cellwidth = 0.3, cellheight = 6,fontsize_row = 6,
+#                    cluster_rows = F, cluster_cols = F)
+# dev.off()
+```
+
+
+### 6-day cells
+
+#### Cell cycle may happen in the cells
+
+Initiation of centresome duplication
+CDK2
+CDK4
+CDK6
+PLK2
+PLK6
+AURKA
+
+MAD2L1 is a component of the mitotic spindle assembly checkpoint that prevents the onset of anaphase until all chromosomes are properly aligned at the metaphase plate.
+
+CDKN1A/p21
+
+This gene encodes a potent cyclin-dependent kinase inhibitor. The encoded protein binds to and inhibits the activity of cyclin-cyclin-dependent kinase2 or -cyclin-dependent kinase4 complexes, and thus functions as a regulator of cell cycle progression at G1. The expression of this gene is tightly controlled by the tumor suppressor protein p53, through which this protein mediates the **p53-dependent cell cycle G1 phase arrest** in response to a variety of stress stimuli. 
+
+```{r}
+plotTSNE(P11553, colour_by = c("CDKN1A"))
+```
+
+## tSNE plot
+
+```{r,fig.width = 12, fig.height = 5,}
+p1 <- plotTSNE(P11553, colour_by = "source", shape_by = "Patient2")
+p2 <- plotTSNE(P11553, colour_by = "final.clusters")
+cowplot::plot_grid(p1,p2)
+# tiff("../manuscript_plots/Figure3A_tSNE.tiff",res = 200,width = 12, height = 5, units = "in")
+# cowplot::plot_grid(p1,p2)
+# dev.off()
+```
+
+## Wnt & Notch pathways
+
+```{r}
+wnt <- read.table("../hgnc_groups/kegg_wnt.grp.txt",as.is = T, skip = 2)
+wnt <- wnt[,1]
+
+na.omit(rls[match(wnt, rls$gene),])
+```
+
+```{r}
+wnt_expr <- logcounts(P11553)[match(wnt, rownames(P11553)),]
+wnt_expr <- na.omit(wnt_expr)
+wnt_expr <- wnt_expr[rowSums(wnt_expr > 1) > 30,]
+wnt_expr <- wnt_expr[rownames(wnt_expr) %in% rls$gene,]
+wnt_expr[1:10, 1:10]
+```
