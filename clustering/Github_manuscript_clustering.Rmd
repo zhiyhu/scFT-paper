@@ -92,33 +92,33 @@ dim(secretory)
 
 ## Markers of ciliated/secretory
 
-```{r what-are-the-marker-genes-of-ciliated-secretory-cells}
-## not run
-# ciliated  <- sceset[,sceset$final.clusters %in% c(11) & sceset$source == "Fresh" & sceset$Patient != "15066L"]
-# ciliated <- ciliated[   ,logcounts(ciliated)["KRT7",] <= 2 & 
-#                          logcounts(ciliated)["EPCAM",] > 2 & 
-#                          logcounts(ciliated)["PTPRC",] == 0 &
-#                          logcounts(ciliated)["CCDC17",] >= 1 ]
-# dim(ciliated)
-# matrix <- expm1(cbind(logcounts(secretory), logcounts(ciliated)))
-# keep <- rowSums(matrix > 1) > 5
-# sum(keep)
-# 
-# dge <- edgeR::DGEList(counts = matrix[keep,]) # make a edgeR object
-# rm(matrix,keep)
-# group <- c(rep("SC",1410), rep("CC", 91))
-# patient <- c(secretory$Patient2, ciliated$Patient2)
-# design <- model.matrix(~ 0+group + patient)  
-# v <- voom(dge, design, plot = TRUE)
-# fit <- lmFit(v, design) 
-# 
-# cont.matrix <- makeContrasts(contrasts = "groupSC-groupCC",levels=colnames(design))
-# fit <- contrasts.fit(fit, cont.matrix) 
-# fit <- eBayes(fit) 
-# 
-# rls <- topTable(fit, n = Inf, coef = 1, sort = "logFC", lfc = 1, p = 0.05 )
-# rls$gene <- rownames(rls)
-# 
+```{r what-are-the-marker-genes-of-ciliated-secretory-cells, eval=FALSE}
+# not run
+ciliated  <- sceset[,sceset$final.clusters %in% c(11) & sceset$source == "Fresh" & sceset$Patient != "15066L"]
+ciliated <- ciliated[   ,logcounts(ciliated)["KRT7",] <= 2 &
+                         logcounts(ciliated)["EPCAM",] > 2 &
+                         logcounts(ciliated)["PTPRC",] == 0 &
+                         logcounts(ciliated)["CCDC17",] >= 1 ]
+dim(ciliated)
+matrix <- expm1(cbind(logcounts(secretory), logcounts(ciliated)))
+keep <- rowSums(matrix > 1) > 5
+sum(keep)
+
+dge <- edgeR::DGEList(counts = matrix[keep,]) # make a edgeR object
+rm(matrix,keep)
+group <- c(rep("SC",1410), rep("CC", 91))
+patient <- c(secretory$Patient2, ciliated$Patient2)
+design <- model.matrix(~ 0+group + patient)
+v <- voom(dge, design, plot = TRUE)
+fit <- lmFit(v, design)
+
+cont.matrix <- makeContrasts(contrasts = "groupSC-groupCC",levels=colnames(design))
+fit <- contrasts.fit(fit, cont.matrix)
+fit <- eBayes(fit)
+
+rls <- topTable(fit, n = Inf, coef = 1, sort = "logFC", lfc = 1, p = 0.05 )
+rls$gene <- rownames(rls)
+
 # write.csv(rls, "../tables/TableS4_markers_secretory_ciliated20190214.csv", row.names = F)
 ```
 
@@ -468,9 +468,196 @@ table(secretory$clincluster_final, secretory$Patient2)
 # markers2 <- read.csv("../tables/20190120Clincluster_fresh_secretory_9clusters_markers.csv", as.is = T)
 ```
 
+```{r}
+set.seed(1234)
+```
+
+
+## Compare to stromal cells (sc16)
+
+```{r, include=FALSE}
+sc16 <- readRDS("../../20190216scRNA-seq16/clean_data/sceset_sc16.rds")
+stroma <- sc16[,logcounts(sc16)["EPCAM",] == 0 & logcounts(sc16)["PTPRC",] == 0]
+# write.csv(as.data.frame(stroma@colData), "../GEO/sc16_colData.csv")
+# write.table(counts(stroma), "../GEO/sc16_counts.txt", quote = F, sep = "\t")
+```
+
+
+```{r read-in-stromal-cells}
+dim(stroma)
+```
+
+```{r DE-ananlysis-EMTcluster-vs-stromal-cells}
+matrix <- counts(secretory)[,secretory$clincluster_final == "C8"]
+matrix <- cbind(matrix,counts(stroma)[match(rownames(matrix), rownames(stroma)),] )
+matrix <- cpm(matrix)
+dge <- edgeR::DGEList(counts = matrix[rowSums(matrix) > 5, ])
+info <- c(rep("C8", 40), rep("str",91))
+design <- model.matrix(~ 0 + info)
+v <- voom(dge, design, plot = F)
+fit <- lmFit(v, design) # Linear Model for Series of Arrays
+cont.matrix <- makeContrasts(contrasts = "infoC8-infostr",levels=design)
+fit <- contrasts.fit(fit, cont.matrix ) # Linear Model for Series of Arrays
+fit <- eBayes(fit)
+
+C8.m <- topTable(fit, p.value = 0.05, number = Inf, coef = 1, lfc = 0.6, sort.by = "logFC")
+C8.m$gene <- rownames(C8.m)
+which(markers2$gene[markers2$cluster == "C8"] %in% C8.m$gene[C8.m$logFC > 0])
+```
+
+```{r DE-ananlysis-EMTcluster-vs-other-secretory}
+matrix <- counts(secretory)[,secretory$clincluster_final == "C8"]
+matrix <- cbind(matrix, counts(secretory)[,secretory$clincluster_final %in% c("C3","C4","C10")])
+matrix <- cbind(matrix,counts(stroma)[match(rownames(matrix), rownames(stroma)),] )
+info <- c(rep("C8",sum(secretory$clincluster_final == "C8")),
+           rep("secretory", sum(secretory$clincluster_final %in% c("C3","C4","C10"))),
+          rep("str",91))
+matrix <- cpm(matrix)
+dge <- edgeR::DGEList(counts = matrix[rowSums(matrix) > 5, ])
+
+design <- model.matrix(~ 0 + info)
+v <- voom(dge, design, plot = F)
+fit <- lmFit(v, design) # Linear Model for Series of Arrays
+cont.matrix <- makeContrasts(contrasts = c("infoC8-infosecretory","infostr-infosecretory","infostr-infoC8"),levels=design)
+fit <- contrasts.fit(fit, cont.matrix) # Linear Model for Series of Arrays
+fit <- eBayes(fit)
+
+StrvsSec.m <- topTable(fit, p.value = 0.05, number = Inf, coef = 2, lfc = 0.6, sort.by = "logFC")
+StrvsSec.m$gene <- rownames(StrvsSec.m)
+
+C8vsSec.m <- topTable(fit, p.value = 0.05, number = Inf, coef = 1, lfc = 0.6, sort.by = "logFC")
+C8vsSec.m$gene <- rownames(C8vsSec.m)
+
+StrvsC8.m <- topTable(fit, p.value = 0.05, number = Inf, coef = 1, lfc = 0.6, sort.by = "logFC")
+StrvsC8.m$gene <- rownames(StrvsC8.m)
+```
+
+```{r setup-stroma-control-comparison}
+stroma_control <- SingleCellExperiment(assays = list(counts = matrix ), colData = data.frame(Type = info))
+logcounts(stroma_control) <- log1p(calculateCPM(stroma_control))
+
+plotExpression(stroma_control, features = c(markers2$gene[markers2$cluster == "C8"][which(markers2$gene[markers2$cluster == "C8"] %in% C8.m$gene[C8.m$logFC > 0])]), x = "Type", ncol = 4, scales = "free")
+```
+
+```{r plotexpression-stromaVScontrol-COL1A2COL3A1}
+plotExpression(stroma_control, features = c("COL1A2","COL3A1"), x = "Type", ncol = 2, scales = "free")  + 
+    scale_x_discrete(labels = c("EMT","Other FTESCs","Stroma"),breaks = c("C8","secretory","str")) + 
+    theme(strip.background = element_rect(fill = "white"),strip.text.x = element_text(face = "italic", size = 12))
+# ggsave("plots/SuppFig3_EMT_stroma_col1a.png", height = 3, width = 5)
+```
+
+
+
+
+```{r plotexpression-stromaVScontrol}
+plotExpression(stroma_control, features = c("SPARC","RGS16","COL1A2","COL3A1","EPCAM","KRT7"), 
+               x = "Type", ncol = 2, scales = "free") + 
+    scale_x_discrete(labels = c("EMT","Other FTESCs","Stroma"),breaks = c("C8","secretory","str")) + 
+    theme(strip.background = element_rect(fill = "white"),strip.text.x = element_text(face = "italic", size = 12))
+
+# ggsave("plots/SuppFig3_EMT_markers_with_stroma_control.png", width = 6, height = 8)
+```
+
+
+<!-- MIR17HG: This gene is the host gene for the MIR17-92 cluster, a group of at least six microRNAs (miRNAs) that may be involved in cell survival, proliferation, differentiation, and angiogenesis. Amplification of this gene has been found in several lymphomas and solid tumors. Two non-protein coding transcript variants have been found for this host gene, but only the longest is a polycistronic transcript containing the MIR17-92 cluster. [provided by RefSeq, May 2012] -->
+
+<!-- RHOB: Also required for stability and nuclear trafficking of AKT1/AKT which promotes endothelial cell survival during vascular development. Serves as a microtubule-dependent signal that is required for the myosin contractile ring formation during cell cycle cytokinesis. Required for genotoxic stress-induced cell death in breast cancer cells. -->
+
+## Using DoubletFinder
+
+```{r plot-UMAP-of-all-fresh-cells}
+fresh <- sceset[,sceset$source == "Fresh"]
+
+fresh$cell_type <- NA
+fresh$cell_type[colnames(fresh) %in% colnames(sceset)[sceset$final.clusters == 11]] <- "Ciliated"
+fresh$cell_type[colnames(fresh) %in% colnames(secretory)] <- "Secretory"
+
+table(fresh$cell_type)
+```
+
+```{r preprare-seurat-object-for-DoubletFinder}
+library(DoubletFinder) # 2.0.1
+# devtools::install_version(package = 'Seurat', version = package_version('2.3.4'))
+library(Seurat) # 2.3.4
+
+fresh_seu <- Seurat::as.seurat(fresh)
+sc16_seu <- Seurat::as.seurat(sc16)
+sc16_seu@meta.data$Source <- "Fresh"
+fresh_seu@meta.data <- fresh_seu@meta.data[,colnames(fresh_seu@meta.data) %in% colnames(sc16_seu@meta.data)]
+sc16_seu@meta.data <- sc16_seu@meta.data[,match(colnames(fresh_seu@meta.data), colnames(sc16_seu@meta.data))]
+
+fresh_seu@meta.data <- fresh_seu@meta.data [,c(1,2,3,4,5,21)]
+sc16_seu@meta.data <- sc16_seu@meta.data [,c(1,2,3,4,5,21)]
+
+seurat <- Seurat::MergeSeurat(object1 = fresh_seu, object2 =  sc16_seu)
+```
+
+```{r, eval=F}
+seurat <- FindVariableGenes(seurat)
+seurat <- ScaleData(seurat)
+seurat <- RunPCA(seurat, pc.genes =  seurat@var.genes)
+
+fresh2 <- as.SingleCellExperiment(seurat)
+set.seed(12334);fresh2 <- runTSNE(fresh2)
+plotTSNE(fresh2, colour_by  = "PTPRC")
+```
+
+
+```{r preprocessing-for-DoubletFinder, eval=F}
+seurat <- NormalizeData(seurat)
+seurat <- FindVariableGenes(seurat, x.low.cutoff = 0.0125, y.cutoff = 0.25, do.plot=FALSE)
+seurat <- ScaleData(object = seurat, genes.use = seurat@var.genes)
+seurat <- RunPCA(seurat, pc.genes = seurat@var.genes, pcs.print = 0)
+seurat <- RunTSNE(seurat, dims.use = 1:10, verbose=TRUE)
+DimElbowPlot(seurat)
+```
+
+```{r seurat-findClusters-tSNEplot, eval=F}
+seurat <- FindClusters(object = seurat, reduction.type = "pca", dims.use = 1:10, 
+    resolution = 0.3, print.output = 0, save.SNN = TRUE, force.recalc = T)
+TSNEPlot(object = seurat)
+```
+
+```{r running-DoubletFinder, eval=FALSE}
+## pK Identification
+sweep.res.list <- paramSweep(seurat, PCs = 1:10)
+sweep.stats <- summarizeSweep(sweep.res.list, GT = FALSE)
+bcmvn <- find.pK(sweep.stats) #0.07
+
+## Homotypic Doublet Proportion Estimate
+annotations <- seurat@ident
+homotypic.prop <- modelHomotypic(annotations)           ## ex: annotations <- seu_kidney@meta.data$ClusteringResults
+nExp_poi <- round(0.01*length(seurat@cell.names))  ## 1% based on 2000 cells 
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+
+## Run DoubletFinder with varying classification stringencies
+seurat <- doubletFinder(seurat, PCs = 1:10, pN = 0.25, pK = 0.07, nExp = nExp_poi, reuse.pANN = FALSE)
+seurat <- doubletFinder(seurat, PCs = 1:10, pN = 0.25, pK = 0.07, nExp = nExp_poi.adj, reuse.pANN = "pANN_0.25_0.07_25")
+# saveRDS(seurat,"rds/20190508Seurat_all_fresh_doublefinder.rds", compress = T)
+```
+
+```{r plot-DoubletFinder-results-by-TSNEPlot}
+seurat <- readRDS("../../scFT-paper_rds/20190508Seurat_all_fresh_doublefinder.rds")
+## Plot results
+seurat@meta.data$DF_hi.lo <- seurat@meta.data$DF.classifications_0.25_0.07_25
+seurat@meta.data$DF_hi.lo[which(seurat@meta.data$DF_hi.lo == "Doublet" & seurat@meta.data$DF.classifications_0.25_0.07_21 == "Singlet")] <- "Doublet_lo"
+seurat@meta.data$DF_hi.lo[which(seurat@meta.data$DF_hi.lo == "Doublet")] <- "Doublet_hi"
+TSNEPlot(seurat, group.by="DF_hi.lo", plot.order=c("Doublet_hi","Doublet_lo","Singlet"), colors.use=c("black","gold","red"))
+```
+
+```{r count-the-number-of-doublets-for-each-cell-type}
+seurat@meta.data$cell_type <- NA
+seurat@meta.data$cell_type <- fresh$cell_type[match(rownames(seurat@meta.data), colnames(fresh))]
+seurat@meta.data$cell_subtype <- secretory$clincluster_final[match(rownames(seurat@meta.data), colnames(secretory))]
+
+# table(seurat@meta.data$cell_subtype, seurat@meta.data$DF_hi.lo)
+secretory$DF_hi.lo <- seurat@meta.data$DF_hi.lo[match(colnames(secretory), rownames(seurat@meta.data))]
+knitr::kable(table(secretory$DF_hi.lo[secretory$clincluster_final == "C8"]), caption = "The 40 cells in the EMT cluster are all singlet.")
+```
+
 ## Technical
 
-```{r}
+```{r technical-sessioninfo}
 sessionInfo()
 ```
 
