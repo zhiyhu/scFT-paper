@@ -1,0 +1,303 @@
+---
+title: "Deconvolution of bulk expression data"
+author: "Zhiyuan Hu"
+date: "2019/11/25"
+output: html_document
+---
+
+```{r setup, include=FALSE, cache=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE, fig.width = 6, fig.height = 4)
+
+# devtools::install_github('shenorrlab/bseq-sc')
+library(bseqsc)
+
+library(MASS)
+library(xbioc)
+library(e1071) #svm
+library(preprocessCore)
+
+library(survminer)
+library(survival)
+library(powerSurvEpi)
+library(survminer)
+
+library(Biobase)
+library(SingleCellExperiment)
+library(scater)
+
+library(ggbeeswarm)
+library(ggrepel)
+library(viridis)
+
+library(edgeR)
+library(limma)
+# library(copynumber)
+```
+
+## Summary
+
+## Single cell data
+
+```{r read-single-cell-data, include = F}
+# source("../../scFT-paper_hmtlReports/modified_functions20190204.R")
+
+# Single cell data - Fresh cells
+# secretory <- readRDS("../../scFT-paper_rds/20190120Fresh_secretory_9clusters_clincluster.rds")
+# sceset <- readRDS("../../scFT-paper_rds/20180917Sceset_12clusters.rds")
+# markers2 <- read.csv("../../scFT-paper_rds/20190120Clincluster_fresh_secretory_9clusters_markers.csv", row.names = 1, as.is = T)
+# markers_sceset <- read.csv("../../scFT-paper_rds/20180917sceset_markers_12cluster-Zhiyuan’s iMac.csv", row.names = 1, as.is = T)
+# fresh <- sceset[,sceset$source == "Fresh"]
+# # rm(secretory)
+# rm(sceset)
+# save.image("../../scFT-paper_rds/20191125background_deconvolution_scRNAseqData.rdata", compress = T)
+```
+
+```{r read-single-cell-data-image}
+load("../../scFT-paper_rds/20191125background_deconvolution_scRNAseqData.rdata")
+```
+
+
+## Select Markers
+
+We selected the representative marker genes to denote the transcriptomic signatures of the five FTE cell subtypes.
+
+```{r select-markers}
+marker.C3 <- markers2[markers2$cluster == "C3" & markers2$logFC > 1.79, ]
+marker.C4 <- markers2[markers2$cluster == "C4" & markers2$logFC > 1.5 & markers2$ratio2 < 0.3,]
+marker.EMT <- markers2[markers2$cluster == "C8" & markers2$logFC > 2 & markers2$ratio2 < 0.2,]
+marker.C10 <- markers2[markers2$cluster == "C10" & markers2$logFC > 2.5 & markers2$ratio2 < 0.2,]
+marker.ciliated <- markers_sceset[markers_sceset$cluster == 9 & markers_sceset$logFC > 6 & markers_sceset$ratio2 < 0.1,]
+
+markers <- list(C3 = marker.C3$gene,
+                C4 = marker.C4$gene,
+                EMT = marker.EMT$gene,
+                C10 = marker.C10$gene,
+                ciliated = marker.ciliated$gene)
+```
+
+
+#### Construct a scRNA-seq dataset for fresh FTE cells
+
+```{r perpare-fresheset}
+fresheset <- ExpressionSet(assayData = as.matrix(counts(fresh)),
+                           phenoData = new("AnnotatedDataFrame",
+                                           data=as.data.frame(fresh@colData)))
+fresheset$cell.type <- NA
+fresheset$cell.type[fresheset$Sample %in% secretory$Sample[secretory$clincluster_final == "C3"]] <- "C3" # differentiated
+fresheset$cell.type[fresheset$Sample %in% secretory$Sample[secretory$clincluster_final == "C4"]] <- "C4" # KRT17 cluster
+fresheset$cell.type[fresheset$Sample %in% secretory$Sample[secretory$clincluster_final == "C8"]] <- "EMT"
+fresheset$cell.type[fresheset$Sample %in% secretory$Sample[secretory$clincluster_final == "C10"]] <- "C10" # cell cycle clusters
+fresheset$cell.type[fresheset$clincluster == 9] <- "ciliated"
+
+fresheset <- fresheset[,!is.na(fresheset$cell.type)]
+table(fresheset$cell.type)
+```
+
+```{r prepare-fresh-SingleCellExperiment_object}
+fresh <- fresh[,match(colnames(fresheset), colnames(fresh))]
+fresh$cell.type <- fresheset$cell.type
+```
+
+
+## Data
+
+The eset datasets are preprocessed by '20181028Prepare_datasets.rmd'
+
+The signature matrix is actually the mean expression within one cluster after normalisation (non-log-space).
+
+We read the TCGA, AOCS and OXO-PCR preprocessed data from a saved RData file.
+
+
+```{r read-tcga-data, eval=F}
+## TCGA data
+eset <- readRDS("../../man_analysis3_20190724/R_deconvolution/rds/20181029TCGA_eset.rds")
+exprs_tcga <- readRDS("../../man_analysis3_20190724/R_deconvolution/rds/20181029TCGA_exprs_nonlog.rds")
+
+tcga <- SingleCellExperiment(assays = list(counts = eset@assayData$exprs),
+                             colData = as.data.frame(pData(eset)))
+logcounts(tcga) <- log2(calculateCPM(tcga) + 1)
+
+eset$stage_dichotomized <- "early"
+eset$stage_dichotomized[eset$clinical_stage%in% c("Stage IIIA","Stage IIIB","Stage IIIC","Stage IV")] <- "late"
+
+eset$residual_disease1 <- NA
+eset$residual_disease1[eset$tumor_residual_disease %in% c(">20 mm", "11-20 mm") ] <- "residual"
+eset$residual_disease1[eset$tumor_residual_disease %in% c("No Macroscopic disease","1-10 mm") ] <- "no_residual"
+
+## AOCS data
+toteset <- readRDS("../../man_analysis3_20190724/R_deconvolution/rds/20181029_tothill_eset.rds")
+exprs_tot <- readRDS("../../man_analysis3_20190724/R_deconvolution/rds/20181029_tothill_exprs_nonlog.rds")
+
+pData(toteset)$OS <- FALSE
+pData(toteset)$OS[pData(toteset)$patient.status == "D"] <- TRUE
+
+toteset$histological.subtype2 <- "ser"
+toteset$histological.subtype2[toteset$histological.subtype != "Ser"] <- "non-ser"
+toteset$histological.subtype2 <- as.factor(toteset$histological.subtype2)
+
+## OXO-PCR data
+oxopcr_pre <- readRDS("../../../OXO_PCR/R/rds/OXO_PCR_Allsamples_2018Oct_PreChemo.rds")
+oxopcr_info_pre <- readRDS("../../../OXO_PCR/R/rds/OXO_PCR_Allsamples_2018Oct_PreChemo_sampleInfo.rds")
+
+# save.image("../../scFT-paper_rds/bulkExprData_forDeconvolution20191125.rdata", compress = T)
+```
+
+```{r load-bulk-RNAseq-data}
+load("../../scFT-paper_rds/bulkExprData_forDeconvolution20191125.rdata")
+```
+
+
+## Select genes by PCA in TCGA data
+
+```{r marker_pca_function}
+# we removed the marker genes with little dispersion in the bulk RNAseq data
+pca_emt <- function(markers){
+  markers_in <- intersect(markers, rownames(tcga))
+  exprs_mat <- logcounts(tcga)[match(markers_in, rownames(tcga)), ,drop = F]
+
+  ## scale
+  exprs_mat <- t(exprs_mat)
+  vars <- DelayedMatrixStats::colVars(DelayedArray(exprs_mat))
+  exprs_mat <- sweep(exprs_mat, MARGIN=2, # We scale by the standard deviation, which also changes the centre.
+             STATS=sqrt(vars), FUN="/", 
+             check.margin=FALSE) # divide by the square root of vars
+
+  ## PCA
+  pca <- prcomp(exprs_mat)
+
+  emt_w <- pca$rotation[,1]
+  emt_w <- emt_w[order(emt_w, decreasing = T)]
+  
+  emt_w 
+}
+```
+
+```{r select-markers-by-pcs}
+## genes with too good correlations can go (i.e. cor > 0.8)
+# cor(t(log1p(exprs_tcga)[new_markers$EMT,]))
+new_markers <- list()
+
+# new_markers$progenitor <- markers$progenitor
+out <- pca_emt(markers = markers$C3)
+out 
+new_markers$C3 <- names(out)[abs(out) > 0.2]
+
+out <- pca_emt(markers = markers$C4)
+out
+new_markers$C4 <- names(out)[abs(out) > 0.2]
+
+out <- pca_emt(markers = markers$EMT)
+out
+new_markers$EMT <- names(out)[abs(out) > 0.2]
+# cor(t(log1p(exprs_tcga)[new_markers$EMT,]))
+
+out <- pca_emt(markers = markers$C10)
+out
+new_markers$C10 <- names(out)[abs(out) > 0.2]
+
+out <- pca_emt(markers = markers$ciliated)
+out
+new_markers$ciliated <- names(out)[abs(out) > 0.2]
+new_markers$ciliated <- new_markers$ciliated[c(1,2,3,8,9,10,13,14)] # remove redundant geens by cor > 0.8
+str(new_markers)
+```
+
+```{r length-of-signaure}
+length(unlist(new_markers))
+```
+
+There are 52 genes in total
+
+## BSEQ-sc: compute the reference matrix
+
+```{r bseq-signature-matrix}
+sig_matrix_new <- bseq_my(markers = new_markers)
+## upper limit
+quantile(sig_matrix_new, 0.99)
+
+sig_matrix_new[sig_matrix_new > quantile(sig_matrix_new, 0.99)] <- quantile(sig_matrix_new, 0.99) # average the too high value
+```
+
+```{r save-plot-and-data-about-signature-matrix}
+# pdf("plots_explore/20190207/sig_matrix_new.pdf", width = 4, height = 4)
+# plotBasis(sig_matrix_new, new_markers, Colv = NA, Rowv = NA, layout = '_', col = 'Blues')
+# dev.off()
+
+# saveRDS(sig_matrix_new, "../../scFT-paper_rds/20190213sig_matrix_new.rds", compress = T)
+# saveRDS(new_markers, "../../scFT-paper_rds/20190213new_markers.rds", compress = T)
+# saveRDS(fresheset, "rds/20190213fresheset.rds", compress = T)
+
+# write.csv(sig_matrix_new,"20190213_selected_signature_matrix_52genes.csv")
+```
+
+
+#### Cibersort TCGA
+
+Use the reference matrix to decompose TCGA data
+
+```{r deconvolute-TCGA-data-and-heatmap}
+svr_fit_new <- cibersort_my(sig_matrix = sig_matrix_new, exprs_unlogged = exprs_tcga)
+eset$EMT <- svr_fit_new[,"EMT"]
+head(svr_fit_new)
+```
+
+
+###### Stacked box plot
+
+```{r tcga-stacked-boxplot-deconvolution-results}
+svr_fit_new_diff <- svr_fit_new[svr_fit_new[,1] > 0.5,]
+svr_fit_new_diff <- svr_fit_new_diff[order(svr_fit_new_diff[,1], decreasing = F),]
+svr_fit_new_krt <- svr_fit_new[svr_fit_new[,2] > 0.5,]
+svr_fit_new_krt <- svr_fit_new_krt[order(svr_fit_new_krt[,2], decreasing = F),]
+svr_fit_new_emt <- svr_fit_new[svr_fit_new[,3] > 0.5,]
+svr_fit_new_emt <- svr_fit_new_emt[order(svr_fit_new_emt[,3], decreasing = F),]
+svr_fit_new_cc <- svr_fit_new[svr_fit_new[,4] > 0.5,]
+svr_fit_new_cc <- svr_fit_new_cc[order(svr_fit_new_cc[,4], decreasing = F),]
+svr_fit_new_others <- svr_fit_new[!rownames(svr_fit_new) %in% c(rownames(svr_fit_new_diff),rownames(svr_fit_new_krt),
+                                                               rownames(svr_fit_new_emt),rownames(svr_fit_new_cc)),]
+
+plot.data <- data.frame(sample = rep(rownames(svr_fit_new2), 5),
+                        state = rep(c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"), each = nrow(svr_fit_new2)),
+                        score = c(svr_fit_new2[,1],
+                                  svr_fit_new2[,2],
+                                  svr_fit_new2[,3],
+                                  svr_fit_new2[,4],
+                                  svr_fit_new2[,5]))
+plot.data$sample <- factor(plot.data$sample, levels = c(rownames(svr_fit_new_diff),rownames(svr_fit_new_krt),
+                                                               rownames(svr_fit_new_emt),rownames(svr_fit_new_cc),
+                                                        rownames(svr_fit_new_others)))
+plot.data$state <- factor(plot.data$state, levels = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"))
+# differentiated #A16BA3
+# F6A000 KRT7
+# FFDE00 EMT
+# CC #4DD9FF
+#F3A1B6 Ciliated
+```
+
+```{r, fig.width=10, fig.height=3}
+ggplot(plot.data) + geom_bar(aes(y = score, x = sample, fill = state),
+                           stat="identity") + theme_pubclean() + 
+  scale_fill_manual(values = c("#A16BA3","#F6A000","#FFDE00","#4DD9FF","#F3A1B6"), 
+                    breaks = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"), 
+                    labels = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated")) +
+  xlab("TCGA bulk tumour samples") + ylab("Proportion") +
+  theme(axis.ticks.x  = element_blank(), axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size= 15),
+        legend.text = element_text(size = 12),
+        legend.title  = element_blank())
+
+# ggsave("plots/Fig4_TCGA_stackedBarplot_20190509.png", width = 10, height = 5)
+```
+
+```{r}
+plot.data2 <- data.frame(State = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"),
+                         Fraction = colSums(svr_fit_new[,1:5] > 0)/nrow(svr_fit_new))
+plot.data2$State <- factor(plot.data2$State, levels = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated")[5:1])
+ggplot(plot.data2) + geom_bar(aes(y = Fraction,  x = State , fill = State),stat = "identity")+ theme_pubclean() + coord_flip()+ 
+  scale_fill_manual(values = c("#A16BA3","#F6A000","#FFDE00","#4DD9FF","#F3A1B6")[5:1], 
+                    breaks = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"), 
+                    labels = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated")) +
+  theme(legend.position = "none", axis.text = element_text(size = 16), axis.title = element_text(size = 20))
+# ggsave("plots/Fig4_TCGA_barplot_20190509.png", width = 4, height = 5)
+```
