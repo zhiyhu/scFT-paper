@@ -32,6 +32,9 @@ library(viridis)
 library(edgeR)
 library(limma)
 # library(copynumber)
+
+library(ggplot2)
+library(RColorBrewer)
 ```
 
 ## Summary
@@ -39,16 +42,16 @@ library(limma)
 ## Single cell data
 
 ```{r read-single-cell-data, include = F}
-# source("../../scFT-paper_hmtlReports/modified_functions20190204.R")
+source("../../scFT-paper_hmtlReports/modified_functions20190204.R")
 
 # Single cell data - Fresh cells
-# secretory <- readRDS("../../scFT-paper_rds/20190120Fresh_secretory_9clusters_clincluster.rds")
-# sceset <- readRDS("../../scFT-paper_rds/20180917Sceset_12clusters.rds")
-# markers2 <- read.csv("../../scFT-paper_rds/20190120Clincluster_fresh_secretory_9clusters_markers.csv", row.names = 1, as.is = T)
-# markers_sceset <- read.csv("../../scFT-paper_rds/20180917sceset_markers_12cluster-Zhiyuan’s iMac.csv", row.names = 1, as.is = T)
-# fresh <- sceset[,sceset$source == "Fresh"]
-# # rm(secretory)
-# rm(sceset)
+secretory <- readRDS("../../scFT-paper_rds/20190120Fresh_secretory_9clusters_clincluster.rds")
+sceset <- readRDS("../../scFT-paper_rds/20180917Sceset_12clusters.rds")
+markers2 <- read.csv("../../scFT-paper_rds/20190120Clincluster_fresh_secretory_9clusters_markers.csv", row.names = 1, as.is = T)
+markers_sceset <- read.csv("../../scFT-paper_rds/20180917sceset_markers_12cluster-Zhiyuan’s iMac.csv", row.names = 1, as.is = T)
+fresh <- sceset[,sceset$source == "Fresh"]
+# rm(secretory)
+rm(sceset)
 # save.image("../../scFT-paper_rds/20191125background_deconvolution_scRNAseqData.rdata", compress = T)
 ```
 
@@ -179,27 +182,27 @@ new_markers <- list()
 
 # new_markers$progenitor <- markers$progenitor
 out <- pca_emt(markers = markers$C3)
-out 
+# out 
 new_markers$C3 <- names(out)[abs(out) > 0.2]
 
 out <- pca_emt(markers = markers$C4)
-out
+# out
 new_markers$C4 <- names(out)[abs(out) > 0.2]
 
 out <- pca_emt(markers = markers$EMT)
-out
+# out
 new_markers$EMT <- names(out)[abs(out) > 0.2]
 # cor(t(log1p(exprs_tcga)[new_markers$EMT,]))
 
 out <- pca_emt(markers = markers$C10)
-out
+# out
 new_markers$C10 <- names(out)[abs(out) > 0.2]
 
 out <- pca_emt(markers = markers$ciliated)
-out
+# out
 new_markers$ciliated <- names(out)[abs(out) > 0.2]
 new_markers$ciliated <- new_markers$ciliated[c(1,2,3,8,9,10,13,14)] # remove redundant geens by cor > 0.8
-str(new_markers)
+# str(new_markers)
 ```
 
 ```{r length-of-signaure}
@@ -218,7 +221,7 @@ quantile(sig_matrix_new, 0.99)
 sig_matrix_new[sig_matrix_new > quantile(sig_matrix_new, 0.99)] <- quantile(sig_matrix_new, 0.99) # average the too high value
 ```
 
-```{r save-plot-and-data-about-signature-matrix}
+```{r save-plot-and-data-about-signature-matrix, include=F}
 # pdf("plots_explore/20190207/sig_matrix_new.pdf", width = 4, height = 4)
 # plotBasis(sig_matrix_new, new_markers, Colv = NA, Rowv = NA, layout = '_', col = 'Blues')
 # dev.off()
@@ -239,12 +242,16 @@ Use the reference matrix to decompose TCGA data
 svr_fit_new <- cibersort_my(sig_matrix = sig_matrix_new, exprs_unlogged = exprs_tcga)
 eset$EMT <- svr_fit_new[,"EMT"]
 head(svr_fit_new)
+
+# write.csv(eset,"../../scFT-paper_rds/20191125TCGA_deconvolutionResults.csv")
 ```
 
 
-###### Stacked box plot
+###### Barplots
 
-```{r tcga-stacked-boxplot-deconvolution-results}
+Barplots
+
+```{r tcga-stacked-barplot-deconvolution-results}
 svr_fit_new_diff <- svr_fit_new[svr_fit_new[,1] > 0.5,]
 svr_fit_new_diff <- svr_fit_new_diff[order(svr_fit_new_diff[,1], decreasing = F),]
 svr_fit_new_krt <- svr_fit_new[svr_fit_new[,2] > 0.5,]
@@ -256,13 +263,13 @@ svr_fit_new_cc <- svr_fit_new_cc[order(svr_fit_new_cc[,4], decreasing = F),]
 svr_fit_new_others <- svr_fit_new[!rownames(svr_fit_new) %in% c(rownames(svr_fit_new_diff),rownames(svr_fit_new_krt),
                                                                rownames(svr_fit_new_emt),rownames(svr_fit_new_cc)),]
 
-plot.data <- data.frame(sample = rep(rownames(svr_fit_new2), 5),
-                        state = rep(c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"), each = nrow(svr_fit_new2)),
-                        score = c(svr_fit_new2[,1],
-                                  svr_fit_new2[,2],
-                                  svr_fit_new2[,3],
-                                  svr_fit_new2[,4],
-                                  svr_fit_new2[,5]))
+plot.data <- data.frame(sample = rep(rownames(svr_fit_new), 5),
+                        state = rep(c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"), each = nrow(svr_fit_new)),
+                        score = c(svr_fit_new[,1],
+                                  svr_fit_new[,2],
+                                  svr_fit_new[,3],
+                                  svr_fit_new[,4],
+                                  svr_fit_new[,5]))
 plot.data$sample <- factor(plot.data$sample, levels = c(rownames(svr_fit_new_diff),rownames(svr_fit_new_krt),
                                                                rownames(svr_fit_new_emt),rownames(svr_fit_new_cc),
                                                         rownames(svr_fit_new_others)))
@@ -274,7 +281,7 @@ plot.data$state <- factor(plot.data$state, levels = c("Differentiated","KRT17","
 #F3A1B6 Ciliated
 ```
 
-```{r, fig.width=10, fig.height=3}
+```{r  tcga-stacked-barplot-plotting, fig.width=10, fig.height=3}
 ggplot(plot.data) + geom_bar(aes(y = score, x = sample, fill = state),
                            stat="identity") + theme_pubclean() + 
   scale_fill_manual(values = c("#A16BA3","#F6A000","#FFDE00","#4DD9FF","#F3A1B6"), 
@@ -290,7 +297,7 @@ ggplot(plot.data) + geom_bar(aes(y = score, x = sample, fill = state),
 # ggsave("plots/Fig4_TCGA_stackedBarplot_20190509.png", width = 10, height = 5)
 ```
 
-```{r}
+```{r tcga-deconvolutin-barplot}
 plot.data2 <- data.frame(State = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"),
                          Fraction = colSums(svr_fit_new[,1:5] > 0)/nrow(svr_fit_new))
 plot.data2$State <- factor(plot.data2$State, levels = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated")[5:1])
@@ -301,3 +308,279 @@ ggplot(plot.data2) + geom_bar(aes(y = Fraction,  x = State , fill = State),stat 
   theme(legend.position = "none", axis.text = element_text(size = 16), axis.title = element_text(size = 20))
 # ggsave("plots/Fig4_TCGA_barplot_20190509.png", width = 4, height = 5)
 ```
+
+
+###### t-SNE plot
+
+```{r TCGA-deconvolution-tSNE-plot, fig.width=12, fig.height=2.4}
+colnames(svr_fit_new)[c(1,2,4,5)] <- c("Differentiated","KRT17","Cell_cycle","Ciliated")
+
+set.seed(158163)
+tsne_res <- tsne::tsne(svr_fit_new[,1:5], k = 2, perplexity = round(0.05*nrow(svr_fit_new)))
+
+df_tsne <- data.frame(TSNE_1 = tsne_res[,1],
+                     TSNE_2 = tsne_res[,2],
+                     EMT = svr_fit_new[,"EMT"],
+                     Cell_cycle = svr_fit_new[,"Cell_cycle"],
+                     Differentiated = svr_fit_new[,1],
+                     KRT17 = svr_fit_new[,2],
+                     Ciliated =  svr_fit_new[,5],
+                     sample = rownames(svr_fit_new))
+p1 <- ggplot(df_tsne, aes(x = TSNE_1, y = TSNE_2, col = EMT)) + geom_point(size = 1) + theme_pubclean() + scale_color_viridis() + theme(axis.title = element_blank() , legend.text = element_text(size = 7))
+p2 <- ggplot(df_tsne, aes(x = TSNE_1, y = TSNE_2, col = Cell_cycle)) + geom_point(size =1) + theme_pubclean() + scale_color_viridis() + theme(axis.title = element_blank() , legend.text = element_text(size = 7))
+p3 <- ggplot(df_tsne, aes(x = TSNE_1, y = TSNE_2, col = Differentiated)) + geom_point(size = 1) + theme_pubclean() + scale_color_viridis() + theme(axis.title = element_blank() , legend.text = element_text(size = 7))
+p4 <- ggplot(df_tsne, aes(x = TSNE_1, y = TSNE_2, col = KRT17)) + geom_point(size = 1) + theme_pubclean() + scale_color_viridis() + theme(axis.title = element_blank() , legend.text = element_text(size = 7))
+p5 <- ggplot(df_tsne, aes(x = TSNE_1, y = TSNE_2, col = Ciliated)) + geom_point(size = 1) + theme_pubclean() + scale_color_viridis() + theme(axis.title = element_blank() , legend.text = element_text(size = 7))
+cowplot::plot_grid(p1,p2,p3,p4,p5, ncol = 5)
+# ggsave("plots/Fig6_TSNE_deconvolution_TCGA.pdf",device = "pdf", width = 12.5, height = 3)
+```
+
+```{r tcga-deconvolution-regular-heatmap, include=F}
+df_tsne$Type <- "Mixture"
+df_tsne$Type[df_tsne$EMT > 0.5] <- "EMT"
+df_tsne$Type[df_tsne$Cell_cycle > 0.5] <- "Cell cycle"
+df_tsne$Type[df_tsne$Differentiated > 0.5] <- "Differentiated"
+df_tsne$Type[df_tsne$KRT17 > 0.5] <- "KRT17 Cluster"
+df_tsne$Type[df_tsne$Ciliated > 0.5] <- "Ciliated"
+# RColorBrewer::display.brewer.all()
+RColorBrewer::brewer.pal(8, "Set1")
+# "#E41A1C" "#377EB8" "#4DAF4A" "#984EA3" "#FF7F00" "#FFFF33" "#A65628" "#F781BF"
+my_colour <- RColorBrewer::brewer.pal(8, "Set1")[c(2,4,6,7)]
+# ggplot(df_tsne, aes(x = TSNE_1, y = TSNE_2, col = Type)) + geom_point() + theme_classic() + scale_color_manual(values=c(my_colour,"grey"))
+# ggsave("plots_explore/20190423PCA_deconvolution/TSNE_deconvolution_TCGA2.png", width = 5, height = 3.5)
+
+plot.htmp <- pheatmap::pheatmap(svr_fit_new[,1:5], cluster_cols = F, show_rownames = F, border_color = NA, cellwidth = 20, cellheight = 1)
+# gheat <- ggplotify::as.ggplot(plot.htmp )
+# ggsave(gheat, filename = "plots/Fig4_TCGA_heatmap.pdf", device = "pdf", width = 8, height = 10, units = "in")
+
+```
+
+#### Survival analysis
+
+Univariate survival anlaysis gave significant p-value and hazard ratio ~ 2.3
+
+```{r survival-analysis-univariate-tcga}
+# eset$emt_new <- scale(svr_fit_new[,"EMT"], scale = T, center = T)
+eset$emt_new <- svr_fit_new[,"EMT"]
+fit <- coxph(Surv(OS.time, OS)~emt_new, data=pData(eset))
+summary(fit)
+```
+
+
+
+#### Cibersort AOCS
+
+```{r aocs-deconvolution-and-survival-analysis}
+svr_fit_tot <- cibersort_my(sig_matrix = sig_matrix_new, exprs_unlogged = exprs_tot)
+toteset$emt.new <- svr_fit_tot[,"EMT"]
+# saveRDS(svr_fit_tot, "results/20190502Deconvolution_Tothill.rds", compress = T)
+# only for high-grade and late stage patients
+fit_tot <- coxph(Surv(time.to.death, OS)~emt.new, data=pData(toteset)[toteset$histological.subtype2 == "ser" ,])
+summary(fit_tot)
+```
+
+The univariate survival analysis on AOCS data (serous OvCa only) showed HR = 2.53 with p = 0.000882.
+
+###### Barplots
+
+```{r aocs-prepare-stacked-barplots}
+svr_fit_new_diff <- svr_fit_tot[svr_fit_tot[,1] > 0.5,]
+svr_fit_new_diff <- svr_fit_new_diff[order(svr_fit_new_diff[,1], decreasing = F),]
+svr_fit_new_krt <- svr_fit_tot[svr_fit_tot[,2] > 0.5,]
+svr_fit_new_krt <- svr_fit_new_krt[order(svr_fit_new_krt[,2], decreasing = F),]
+svr_fit_new_emt <- svr_fit_tot[svr_fit_tot[,3] > 0.5,]
+svr_fit_new_emt <- svr_fit_new_emt[order(svr_fit_new_emt[,3], decreasing = F),]
+svr_fit_new_cc <- svr_fit_tot[svr_fit_tot[,4] > 0.5,]
+svr_fit_new_cc <- svr_fit_new_cc[order(svr_fit_new_cc[,4], decreasing = F),]
+svr_fit_new_cil <- svr_fit_tot[svr_fit_tot[,5] > 0.5,]
+svr_fit_new_cil <- svr_fit_new_cil[order(svr_fit_new_cil[,5], decreasing = F),]
+svr_fit_new_others <- svr_fit_tot[!rownames(svr_fit_tot) %in% c(rownames(svr_fit_new_diff),rownames(svr_fit_new_krt),
+                                                               rownames(svr_fit_new_emt),rownames(svr_fit_new_cc),
+                                                               rownames(svr_fit_new_cil)),]
+
+plot.data <- data.frame(sample = rep(rownames(svr_fit_tot), 5),
+                        state = rep(c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"), each = nrow(svr_fit_tot)),
+                        score = c(svr_fit_tot[,1],
+                                  svr_fit_tot[,2],
+                                  svr_fit_tot[,3],
+                                  svr_fit_tot[,4],
+                                  svr_fit_tot[,5]))
+plot.data$sample <- factor(plot.data$sample, levels = c(rownames(svr_fit_new_diff),rownames(svr_fit_new_krt),
+                                                               rownames(svr_fit_new_emt),rownames(svr_fit_new_cc),
+                                                        rownames(svr_fit_new_cil),
+                                                        rownames(svr_fit_new_others)))
+plot.data$state <- factor(plot.data$state, levels = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"))
+# differentiated #A16BA3
+# F6A000 KRT7
+# FFDE00 EMT
+# CC #4DD9FF
+#F3A1B6 Ciliated
+```
+
+```{r aocs-deconvolution-stacked-barplot-plotting, fig.width=10, fig.height=3}
+ggplot(plot.data) + geom_bar(aes(y = score, x = sample, fill = state),
+                           stat="identity") + theme_pubclean() + 
+  scale_fill_manual(values = c("#A16BA3","#F6A000","#FFDE00","#4DD9FF","#F3A1B6"), 
+                    breaks = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"), 
+                    labels = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated")) +
+  xlab("AOCS bulk tumour samples") + ylab("Proportion") +
+  theme(axis.ticks.x  = element_blank(), axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size= 15),
+        legend.text = element_text(size = 12),
+        legend.title  = element_blank())
+
+# ggsave("plots/Fig4_AOCS_stackedBarplot_20190509.png", width = 10, height = 5)
+```
+
+```{r aocs-deconvoltuion-barplot}
+plot.data2 <- data.frame(State = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"),
+                         Fraction = colSums(svr_fit_tot[,1:5] > 0)/nrow(svr_fit_tot))
+plot.data2$State <- factor(plot.data2$State, levels = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated")[5:1])
+ggplot(plot.data2) + geom_bar(aes(y = Fraction,  x = State , fill = State),stat = "identity")+ theme_pubclean() + coord_flip()+ 
+  scale_fill_manual(values = c("#A16BA3","#F6A000","#FFDE00","#4DD9FF","#F3A1B6")[5:1], 
+                    breaks = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"), 
+                    labels = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated")) +
+  theme(legend.position = "none", axis.text = element_text(size = 16), axis.title = element_text(size = 20))
+# ggsave("plots/Fig4_AOCS_barplot_20190509.png", width = 4, height = 5)
+```
+
+
+#### Heatmap: TCGA & AOCS
+
+We plot the heatmap for the diagram
+
+```{r tcga-deconvolution-heatmap-for-diagram}
+data.heatmap <- t(svr_fit_new[,1:5])
+pheatmap::pheatmap(data.heatmap, color = colorRampPalette(brewer.pal(n = 7, name = "Blues"))(100),
+  show_colnames = F, show_rownames = T, cluster_rows = F, cellheight = 30, cellwidth = 0.3)
+
+# pdf("plots/Fig4_heatmap_mini_tcga_20190510.pdf", height = 5, width = 5)
+# pheatmap::pheatmap(data.heatmap, color = colorRampPalette(brewer.pal(n = 7, name = "Blues"))(100),
+#   show_colnames = F, show_rownames = T, cluster_rows = F, cellheight = 30, cellwidth = 0.3)
+# dev.off()
+```
+
+```{r aocs-deconvolution-heatmap-for-diagram}
+data.heatmap <- t(svr_fit_tot[,1:5])
+pheatmap::pheatmap(data.heatmap, color = colorRampPalette(brewer.pal(n = 7, name = "Blues"))(100),
+  show_colnames = F, show_rownames = T, cluster_rows = F, cellheight = 30, cellwidth = 0.3)
+
+# pdf("plots/Fig4_heatmap_mini_aocs_20190510.pdf", height = 5, width = 5)
+# pheatmap::pheatmap(data.heatmap, color = colorRampPalette(brewer.pal(n = 7, name = "Blues"))(100),
+#   show_colnames = F, show_rownames = T, cluster_rows = F, cellheight = 30, cellwidth = 0.3)
+# dev.off()
+```
+
+#### Cibersort OXO-PCR
+
+```{r cibersort-oxopcr}
+svr_fit_oxo <- cibersort_my(sig_matrix = sig_matrix_new, exprs_unlogged = cpm(as.matrix(oxopcr_pre)))
+```
+
+###### Heatmap
+
+
+```{r oxopcr_heatmap}
+rownames(svr_fit_oxo) <- gsub(rownames(svr_fit_oxo), pattern = "X", replacement = "")
+colnames(svr_fit_oxo)[1:5] <- c("Differentiated", "KRT17","EMT","Cell cycle","Ciliated")
+rownames(svr_fit_oxo)[rownames(svr_fit_oxo) == "1G3_new"] <- "1016_1G3new"
+```
+
+```{r oxopcr_heatmap-plotting, include = F}
+plot.htmp <- pheatmap::pheatmap(svr_fit_oxo[order(oxopcr_info_pre$`PATIENT ID`),1:5], cluster_cols = F, cluster_rows = F,show_rownames = T, border_color = NA, cellwidth = 20, cellheight = 8, fontsize = 8)
+gheat <- ggplotify::as.ggplot(plot.htmp)
+# ggsave(gheat, filename = "plots/Fig4_OXOPCR_heatmap20190316.pdf", device = "pdf", width = 8, height = 12, units = "in")
+```
+
+###### Stacked barplot
+
+```{r oxopcr-deconvolution-stacked-barplot}
+svr_fit_new_diff <- svr_fit_oxo[svr_fit_oxo[,1] > 0.5,]
+svr_fit_new_diff <- svr_fit_new_diff[order(svr_fit_new_diff[,1], decreasing = F),]
+svr_fit_new_krt <- svr_fit_oxo[svr_fit_oxo[,2] > 0.5,]
+svr_fit_new_krt <- svr_fit_new_krt[order(svr_fit_new_krt[,2], decreasing = F),]
+svr_fit_new_emt <- svr_fit_oxo[svr_fit_oxo[,3] > 0.5,]
+svr_fit_new_emt <- svr_fit_new_emt[order(svr_fit_new_emt[,3], decreasing = F),]
+svr_fit_new_cc <- svr_fit_oxo[svr_fit_oxo[,4] > 0.5,]
+svr_fit_new_cc <- svr_fit_new_cc[order(svr_fit_new_cc[,4], decreasing = F),]
+svr_fit_new_others <- svr_fit_oxo[!rownames(svr_fit_oxo) %in% c(rownames(svr_fit_new_diff),rownames(svr_fit_new_krt),
+                                                               rownames(svr_fit_new_emt),rownames(svr_fit_new_cc)),]
+
+plot.data <- data.frame(sample = rep(rownames(svr_fit_oxo), 5),
+                        state = rep(c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"), 
+                                    each = nrow(svr_fit_oxo)),
+                        score = c(svr_fit_oxo[,1],
+                                  svr_fit_oxo[,2],
+                                  svr_fit_oxo[,3],
+                                  svr_fit_oxo[,4],
+                                  svr_fit_oxo[,5]))
+plot.data$sample <- factor(plot.data$sample, levels = c(rownames(svr_fit_new_diff),rownames(svr_fit_new_krt),
+                                                               rownames(svr_fit_new_emt),rownames(svr_fit_new_cc),
+                                                        rownames(svr_fit_new_others)))
+plot.data$state <- factor(plot.data$state, levels = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"))
+# differentiated #A16BA3
+# F6A000 KRT7
+# FFDE00 EMT
+# CC #4DD9FF
+#F3A1B6 Ciliated
+```
+
+```{r oxopcr-deconvolution-stacked-barplot-plotting, fig.width=10, fig.height=3}
+ggplot(plot.data) + geom_bar(aes(y = score, x = sample, fill = state),
+                           stat="identity") + theme_pubclean() + 
+  scale_fill_manual(values = c("#A16BA3","#F6A000","#FFDE00","#4DD9FF","#F3A1B6"), 
+                    breaks = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated"), 
+                    labels = c("Differentiated","KRT17","EMT","Cell cycle","Ciliated")) +
+  xlab("TCGA bulk tumour samples") + ylab("Proportion") +
+  theme(axis.ticks.x  = element_blank(), axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size= 15),
+        legend.text = element_text(size = 12),
+        legend.title  = element_blank())
+
+# ggsave("plots/Fig5_OXOPCR_stackedBarplot_20190509.png", width = 7, height = 3)
+```
+
+## Permutation
+
+For TCGA data
+
+```{r permutation-tcga}
+Perm <- 500
+prob <- 0.9
+# ncol(eset) * 0.8
+#  246.4 
+p_val_tcga <- c()
+
+for(itor in 1:Perm){
+  idx <- sample(x = 1:ncol(eset), size = round(ncol(eset) * prob), replace = F)
+  fit <- coxph(Surv(OS.time, OS)~emt_new, data=pData(eset)[idx,])
+  p_val_tcga <- c(p_val_tcga, summary(fit)$coef[,5])
+}
+
+sum(p_val_tcga <= 0.05)/500 * 100
+# [1] 95.2
+```
+
+For the high-grade tumours in Tothill's data
+
+```{r}
+Perm <- 500
+prob <- 0.9
+# ncol(eset) * 0.8
+#  246.4 
+p_val_tot <- c()
+
+for(itor in 1:Perm){
+  idx <- sample(x = which(toteset$Grade >= 2), size = round(sum(toteset$Grade >= 2, na.rm = TRUE) * prob), replace = F)
+  fit <- coxph(Surv(time.to.death, OS)~emt.new, data=pData(toteset)[idx,])
+  p_val_tot <- c(p_val_tot, summary(fit)$coef[,5])
+}
+
+sum(p_val_tot <= 0.05)/500 * 100
+# [1] 99.4
+```
+
+
+
