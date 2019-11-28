@@ -147,6 +147,15 @@ oxopcr_info_pre <- readRDS("../../../OXO_PCR/R/rds/OXO_PCR_Allsamples_2018Oct_Pr
 
 ```{r load-bulk-RNAseq-data}
 load("../../scFT-paper_rds/bulkExprData_forDeconvolution20191125.rdata")
+
+toteset$summarystage <- NA
+toteset$summarystage[toteset$Stage %in% c("I","IA",  "IB" , "IC",  "IIA", "IIB" ,"IIC")] <- "early"
+toteset$summarystage[toteset$Stage %in% c("III",  "IIIA", "IIIB", "IIIC", "IV" )] <- "late"
+
+toteset$summarygrade <- NA
+toteset$summarygrade[toteset$Grade %in% c(1)] <- "low"
+toteset$summarygrade[toteset$Grade %in% c(2,3)] <- "high"
+
 ```
 
 
@@ -366,6 +375,12 @@ fit <- coxph(Surv(OS.time, OS)~emt_new, data=pData(eset))
 summary(fit)
 ```
 
+Multivariate analysis
+
+```{r survival-analysis-multivariate-tcga}
+fit <- coxph(Surv(OS.time, OS)~emt_new+stage_dichotomized, data=pData(eset))
+summary(fit)
+```
 
 
 #### Cibersort AOCS
@@ -380,6 +395,14 @@ summary(fit_tot)
 ```
 
 The univariate survival analysis on AOCS data (serous OvCa only) showed HR = 2.53 with p = 0.000882.
+
+Multivariate analysis
+
+```{r}
+fit_tot <- coxph(Surv(time.to.death, OS)~emt.new+summarystage+summarygrade, data=pData(toteset)[toteset$histological.subtype2 == "ser" ,])
+summary(fit_tot)
+```
+
 
 ###### Barplots
 
@@ -542,7 +565,9 @@ ggplot(plot.data) + geom_bar(aes(y = score, x = sample, fill = state),
 # ggsave("plots/Fig5_OXOPCR_stackedBarplot_20190509.png", width = 7, height = 3)
 ```
 
-## Permutation
+## Permutation test
+
+In the permutation test, we select 90 percent of the samples from each dataset and reran the survival analysis to make sure that the association between EMT scores and the overall survival is robust (not affected by few extreme cases).
 
 For TCGA data
 
@@ -573,7 +598,7 @@ prob <- 0.9
 p_val_tot <- c()
 
 for(itor in 1:Perm){
-  idx <- sample(x = which(toteset$Grade >= 2), size = round(sum(toteset$Grade >= 2, na.rm = TRUE) * prob), replace = F)
+  idx <- sample(x = which(toteset$Grade >= 2 & toteset$histological.subtype2 == "ser"), size = round(sum(toteset$Grade >= 2 & toteset$histological.subtype2 == "ser", na.rm = TRUE) * prob), replace = F)
   fit <- coxph(Surv(time.to.death, OS)~emt.new, data=pData(toteset)[idx,])
   p_val_tot <- c(p_val_tot, summary(fit)$coef[,5])
 }
@@ -583,4 +608,397 @@ sum(p_val_tot <= 0.05)/500 * 100
 ```
 
 
+## CuratedOvarianCancer database
 
+```{r}
+## read in the list of selected CuratedOvarianCancer database
+esets <- readRDS("../../scFT-paper_rds/20190213CuratedOvarianData_esets.rds")
+
+svr_fit <- list() # record cibersort results
+fit <- list() # survival analysis results
+esets_tumor <- list() 
+
+# go through all the datasets, run cibersort
+for(itor in 1:length(esets)) { 
+ 
+  ## tumor data/remove the benign or borderline samples
+  eset_tmp <- esets[[itor]][,esets[[itor]]$sample_type %in% c("tumor","metastatic")]
+  
+  ## deconvolution
+  if(max(na.omit(eset_tmp@assayData$exprs)) < 50) { ## if log-space, unlog it
+    svr_fit[[itor]] <- cibersort_my(sig_matrix = sig_matrix_new, 
+                                    exprs_unlogged = exp(na.omit(eset_tmp@assayData$exprs)))
+  } else {         # non-log space
+    svr_fit[[itor]] <- cibersort_my(sig_matrix = sig_matrix_new, 
+                                    exprs_unlogged = eset_tmp@assayData$exprs)
+  }
+}
+```
+
+
+
+###### Manually iterations
+
+We applied survival analysis on the serous ovarian cancer cases with stage and grade as covariate.
+
+```{r}
+itor=1
+eset_tmp <- esets[[itor]][,esets[[itor]]$sample_type %in% c("tumor","metastatic")]
+# # survival data
+eset_tmp$y <- Surv(eset_tmp$days_to_death,
+                     eset_tmp$vital_status == "deceased")
+eset_tmp$emt <- svr_fit[[itor]][,"EMT"]
+
+table(eset_tmp$sample_type)
+table(eset_tmp$histological_type)
+table(eset_tmp$summarygrade)
+table(eset_tmp$summarystage)
+eset_tmp <- eset_tmp[,eset_tmp$summarystage == "late"]
+fit[[itor]] <- coxph(y~emt, eset_tmp) 
+esets_tumor[[itor]] <- eset_tmp
+
+#####
+
+itor=2
+eset_tmp <- esets[[itor]][,esets[[itor]]$sample_type %in% c("tumor","metastatic")]
+# # survival data
+eset_tmp$y <- Surv(eset_tmp$days_to_death,
+                     eset_tmp$vital_status == "deceased")
+eset_tmp$emt <- svr_fit[[itor]][,"EMT"]
+
+table(eset_tmp$sample_type)
+table(eset_tmp$histological_type)
+table(eset_tmp$summarygrade)
+table(eset_tmp$summarystage)
+
+fit[[itor]] <- coxph(y~emt+summarygrade, eset_tmp) 
+esets_tumor[[itor]] <- eset_tmp
+
+#####
+
+itor=3
+eset_tmp <- esets[[itor]][,esets[[itor]]$sample_type %in% c("tumor","metastatic")]
+# # survival data
+eset_tmp$y <- Surv(eset_tmp$days_to_death,
+                     eset_tmp$vital_status == "deceased")
+eset_tmp$emt <- svr_fit[[itor]][,"EMT"]
+
+table(eset_tmp$sample_type)
+table(eset_tmp$histological_type)
+eset_tmp <- eset_tmp[,eset_tmp$histological_type=="ser"]
+table(eset_tmp$summarygrade)
+table(eset_tmp$summarystage)
+# early  late 
+#    17    62 
+
+
+fit[[itor]] <- coxph(y~emt+summarygrade+summarystage, eset_tmp) 
+esets_tumor[[itor]] <- eset_tmp
+
+
+#####
+
+itor=4
+eset_tmp <- esets[[itor]][,esets[[itor]]$sample_type %in% c("tumor","metastatic")]
+# # survival data
+eset_tmp$y <- Surv(eset_tmp$days_to_death,
+                     eset_tmp$vital_status == "deceased")
+eset_tmp$emt <- svr_fit[[itor]][,"EMT"]
+
+table(eset_tmp$sample_type)
+table(eset_tmp$histological_type)
+# eset_tmp <- eset_tmp[,eset_tmp$histological_type=="ser"]
+table(eset_tmp$summarygrade)
+table(eset_tmp$summarystage)
+# late 
+#  185
+fit[[itor]] <- coxph(y~emt, eset_tmp) 
+esets_tumor[[itor]] <- eset_tmp
+
+#####
+
+itor=5
+eset_tmp <- esets[[itor]][,esets[[itor]]$sample_type %in% c("tumor","metastatic")]
+# # survival data
+eset_tmp$y <- Surv(eset_tmp$days_to_death,
+                     eset_tmp$vital_status == "deceased")
+eset_tmp$emt <- svr_fit[[itor]][,"EMT"]
+
+table(eset_tmp$sample_type)
+table(eset_tmp$histological_type)
+# eset_tmp <- eset_tmp[,eset_tmp$histological_type=="ser"]
+table(eset_tmp$summarygrade)
+table(eset_tmp$summarystage)
+# late 
+#  260 
+
+
+fit[[itor]] <- coxph(y~emt+summarygrade, eset_tmp) 
+esets_tumor[[itor]] <- eset_tmp
+
+#####
+
+itor=6
+eset_tmp <- esets[[itor]][,esets[[itor]]$sample_type %in% c("tumor","metastatic")]
+# # survival data
+eset_tmp$y <- Surv(eset_tmp$days_to_death,
+                     eset_tmp$vital_status == "deceased")
+eset_tmp$emt <- svr_fit[[itor]][,"EMT"]
+
+table(eset_tmp$sample_type)
+table(eset_tmp$histological_type)
+eset_tmp <- eset_tmp[,eset_tmp$histological_type=="ser"]
+table(eset_tmp$summarygrade)
+table(eset_tmp$summarystage)
+# early  late 
+#     5   166 
+fit[[itor]] <- coxph(y~emt+summarygrade+ summarystage, eset_tmp) 
+esets_tumor[[itor]] <- eset_tmp
+
+#####
+
+itor=7
+eset_tmp <- esets[[itor]][,esets[[itor]]$sample_type %in% c("tumor","metastatic")]
+# # survival data
+eset_tmp$y <- Surv(eset_tmp$days_to_death,
+                     eset_tmp$vital_status == "deceased")
+eset_tmp$emt <- svr_fit[[itor]][,"EMT"]
+
+eset_tmp <- eset_tmp[,!is.na(eset_tmp$days_to_death)]
+
+table(eset_tmp$sample_type)
+table(eset_tmp$histological_type)
+eset_tmp <- eset_tmp[,eset_tmp$histological_type=="ser"]
+table(eset_tmp$summarygrade)
+table(eset_tmp$summarystage)
+# early  late 
+#     5   108 
+fit[[itor]] <- coxph(y~emt+summarygrade+summarystage, eset_tmp) 
+esets_tumor[[itor]] <- eset_tmp
+```
+
+
+###### Genrate table 1
+
+```{r}
+df <- matrix(NA, nrow = 7, ncol = 6)
+colnames(df) <- c("nsamples","nevent","hazard_ratio","pvalue","lower.CI95","upper.CI95")
+df <- as.data.frame(df)
+for(itor in 1:7){
+  df$lower.CI95[itor] <- summary(fit[[itor]])$conf.int[1,3]
+  df$upper.CI95[itor] <- summary(fit[[itor]])$conf.int[1,4]
+  df$hazard_ratio[itor] <- summary(fit[[itor]])$conf.int[1,1]
+  df$pvalue[itor] <- summary(fit[[itor]])$coefficient[1,5]
+  df$nsamples[itor] <- summary(fit[[itor]])$n
+  df$nevent[itor] <- summary(fit[[itor]])$nevent
+}
+
+df$database <- c("E.MTAB.386", "GSE13876", "GSE26193",
+              "GSE26712", "GSE32062.GPL6480",
+              "GSE49997", "GSE51088")
+  
+# write.csv(df, "../revision_tables/20191009CuratedOvarianData_results_multivariable_test.csv", row.names = F)
+
+## IC95 error bar plot----
+df <- df[order(df$hazard_ratio, decreasing = T),]
+df <- df[!grepl("TCGA",df$database),]
+ggplot(df[which(df$nsamples > 100),], aes(y = database, x = hazard_ratio))+ geom_point(shape=21, fill = "black",size=4) +
+  geom_errorbarh(aes(xmax = upper.CI95, xmin = lower.CI95), height=0.2, size=1) + theme_survminer() +xlim(c(0, 10)) +
+  geom_vline(xintercept = 1, lty = 3, col = "black") + xlab("Hazard ratio") +ylab("")
+
+# ggsave("plots_explore/20190213Hazard_ratio_CI95_CuratedOvarianData.png",width = 5, height = 6)
+```
+
+```{r}
+knitr::kable(df)
+```
+
+
+###### Put all datasets together
+
+
+```{r}
+## put all datasets together
+esets_tumor[[6]] <- esets_tumor[[6]][,!is.na(esets_tumor[[6]]$alt_sample_name)]
+df_all <- data.frame(database = c(rep("E.MTAB.386",ncol(esets_tumor[[1]])),
+                                  rep("GSE13876",ncol(esets_tumor[[2]])),
+                                  rep("GSE26193",ncol(esets_tumor[[3]])),
+                                  rep("GSE26712",ncol(esets_tumor[[4]])),
+                                  rep("GSE32062.GPL6480",ncol(esets_tumor[[5]])),
+                                  rep("GSE49997",ncol(esets_tumor[[6]])),
+                                  rep("GSE51088",ncol(esets_tumor[[7]])),
+                                  rep("AOCS", ncol(toteset)),
+                                  rep("TCGA", ncol(eset))),
+                     
+                     sample_type = c(esets_tumor[[1]]$sample_type,esets_tumor[[2]]$sample_type,
+                                     esets_tumor[[3]]$sample_type,esets_tumor[[4]]$sample_type,
+                                     esets_tumor[[5]]$sample_type,esets_tumor[[6]]$sample_type,
+                                     esets_tumor[[7]]$sample_type, rep("tumor",ncol(toteset)),
+                                     rep("tumor", ncol(eset))),
+                     
+                     grade = c(esets_tumor[[1]]$summarygrade,esets_tumor[[2]]$summarygrade,
+                               esets_tumor[[3]]$summarygrade,esets_tumor[[4]]$summarygrade,
+                              esets_tumor[[5]]$summarygrade,
+                               esets_tumor[[6]]$summarygrade,esets_tumor[[7]]$summarygrade,
+                               toteset$summarygrade, 
+                               rep("high", ncol(eset))),
+                     stage = c(esets_tumor[[1]]$summarystage,esets_tumor[[2]]$summarystage,
+                               esets_tumor[[3]]$summarystage,esets_tumor[[4]]$summarystage,
+                              esets_tumor[[5]]$summarystage,
+                               esets_tumor[[6]]$summarystage,esets_tumor[[7]]$summarystage,
+                               toteset$summarystage,
+                               eset$stage_dichotomized),
+                     histological_type = c(esets_tumor[[1]]$histological_type,esets_tumor[[2]]$histological_type,
+                                           esets_tumor[[3]]$histological_type,esets_tumor[[4]]$histological_type,
+                                        esets_tumor[[5]]$histological_type,esets_tumor[[6]]$histological_type,
+                                        esets_tumor[[7]]$histological_type, tolower(toteset$histological.subtype),
+                                        rep("ser", ncol(eset)))
+                     )
+
+toteset$vital_status <- NA
+toteset$vital_status[toteset$patient.status != "D"] <- "living"
+toteset$vital_status[toteset$patient.status == "D"] <- "deceased"
+
+df_all$OS <- c(esets_tumor[[1]]$vital_status,esets_tumor[[2]]$vital_status,
+               esets_tumor[[3]]$vital_status,esets_tumor[[4]]$vital_status,
+               esets_tumor[[5]]$vital_status,esets_tumor[[6]]$vital_status,
+               esets_tumor[[7]]$vital_status,toteset$vital_status, tolower(eset$vital_status)
+               )
+
+df_all$days_to_death <- c(esets_tumor[[1]]$days_to_death,esets_tumor[[2]]$days_to_death,
+                          esets_tumor[[3]]$days_to_death,esets_tumor[[4]]$days_to_death,
+                          esets_tumor[[5]]$days_to_death,esets_tumor[[6]]$days_to_death,
+                          esets_tumor[[7]]$days_to_death,
+                          toteset$time.to.death*30,
+                          eset$OS.time)
+
+# df_all <- df_all[df_all$sample_type %in% c("metastatic","tumor"),]
+
+df_all$EMT <- c( esets_tumor[[1]]$emt, esets_tumor[[2]]$emt,
+                  esets_tumor[[3]]$emt,  esets_tumor[[4]]$emt,
+                  esets_tumor[[5]]$emt, esets_tumor[[6]]$emt,
+                  esets_tumor[[7]]$emt,
+                 toteset$emt.new, eset$EMT)
+
+
+# saveRDS(fit,"results/20181122CuratedOvarianData_survival_list.rds",compress = T)
+df_all$years_to_death <- df_all$days_to_death/365
+df_all$y <- Surv(df_all$years_to_death,
+                     df_all$OS == "deceased")
+
+df_all <- df_all[which(df_all$histological_type == "ser"),]
+
+fit <- coxph(y~EMT+grade+stage, data = df_all) 
+summary(fit)
+```
+
+###### Overall KM plot
+
+```{r}
+df_all$EMT_group <- NA
+# df_all$EMT_group[df_all$EMT >= median(df_all$EMT)] <- "high"
+
+for(itor in 1:9){
+   emt_tmp <- median(df_all$EMT[df_all$database == unique(df_all$database)[itor]])
+   df_all$EMT_group[df_all$database == unique(df_all$database)[itor] & df_all$EMT > emt_tmp] <- "high"
+   df_all$EMT_group[df_all$database == unique(df_all$database)[itor] & df_all$EMT <= emt_tmp] <- "low"
+}
+
+table(df_all$EMT_group, df_all$database)
+```
+
+```{r}
+fit1 <- survfit(y~EMT_group, data = df_all)
+ggsurvplot(fit1, data = df_all, pval = F) + xlab("Years") 
+
+# ggsave("../revision_plots/main/20191009_survival_pooled_nine.png", width = 5, height = 4)
+```
+
+## AOCS: Grade & ciliated cells
+
+```{r}
+toteset$ciliated.new <- svr_fit_tot[,"ciliated"]
+ggplot(as.data.frame(pData(toteset))[!is.na(toteset$grade),], aes(x = as.factor(grade), y = ciliated.new)) + geom_violin(scale = "width") + theme_classic() + geom_quasirandom(alpha = 0.4, width = 0.3) +
+  xlab("Grades")+ ylab("Score of ciliated signature")
+
+# ggsave("plots/20190215AOCS_grade_ciliated.pdf", width = 4, height = 3)
+```
+
+```{r}
+wilcox.test(toteset$ciliated.new[toteset$grade==1], toteset$ciliated.new[toteset$grade>1], alternative = "greater")
+```
+
+```{r}
+df_grade <- data.frame(grade = toteset$grade,
+                       exprs = toteset@assayData$exprs["CAPSL",])
+
+ggplot(df_grade, aes(x = as.factor(grade), y = exprs)) + geom_violin()
+
+```
+
+
+## Save data
+
+```{r}
+# saveRDS(eset, "rds/20191009_esetTCGA_afterDeconvolution.rds")
+```
+
+
+## Session info
+
+```{r}
+sessionInfo()
+```
+
+
+## Technical
+
+```{r}
+sessionInfo()
+
+# R version 3.5.2 (2018-12-20)
+# Platform: x86_64-apple-darwin15.6.0 (64-bit)
+# Running under: macOS Mojave 10.14.4
+# 
+# Matrix products: default
+# BLAS: /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBLAS.dylib
+# LAPACK: /Library/Frameworks/R.framework/Versions/3.5/Resources/lib/libRlapack.dylib
+# 
+# locale:
+# [1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+# 
+# attached base packages:
+# [1] stats4    parallel  stats     graphics  grDevices utils     datasets  methods   base     
+# 
+# other attached packages:
+#  [1] RColorBrewer_1.1-2          edgeR_3.24.3                limma_3.38.3                viridis_0.5.1               viridisLite_0.3.0          
+#  [6] ggrepel_0.8.0               ggbeeswarm_0.6.0            scater_1.10.1               SingleCellExperiment_1.4.1  SummarizedExperiment_1.12.0
+# [11] DelayedArray_0.8.0          BiocParallel_1.16.5         matrixStats_0.54.0          GenomicRanges_1.34.0        GenomeInfoDb_1.18.1        
+# [16] powerSurvEpi_0.1.0          survival_2.43-3             survminer_0.4.3             ggpubr_0.2                  magrittr_1.5               
+# [21] ggplot2_3.2.0.9000          preprocessCore_1.44.0       e1071_1.7-0.1               xbioc_0.1.15                AnnotationDbi_1.44.0       
+# [26] IRanges_2.16.0              S4Vectors_0.20.1            MASS_7.3-51.1               bseqsc_1.0                  Biobase_2.42.0             
+# [31] BiocGenerics_0.28.0         csSAM_1.4                   Rcpp_1.0.0                 
+# 
+# loaded via a namespace (and not attached):
+#   [1] colorspace_1.4-0         class_7.3-15             modeltools_0.2-22        mclust_5.4.2             XVector_0.22.0          
+#   [6] rstudioapi_0.9.0         flexmix_2.3-14           bit64_0.9-7              mvtnorm_1.0-8            codetools_0.2-16        
+#  [11] splines_3.5.2            doParallel_1.0.14        robustbase_0.93-3        knitr_1.21               Formula_1.2-3           
+#  [16] broom_0.5.1              gridBase_0.4-7           km.ci_0.5-2              cluster_2.0.7-1          kernlab_0.9-27          
+#  [21] pheatmap_1.0.12          HDF5Array_1.10.1         compiler_3.5.2           rvcheck_0.1.3            backports_1.1.3         
+#  [26] assertthat_0.2.0         Matrix_1.2-15            lazyeval_0.2.1           htmltools_0.3.6          tools_3.5.2             
+#  [31] bindrcpp_0.2.2           gtable_0.2.0             glue_1.3.0               GenomeInfoDbData_1.2.0   reshape2_1.4.3          
+#  [36] dplyr_0.7.8              NMF_0.22                 trimcluster_0.1-2.1      nlme_3.1-137             iterators_1.0.10        
+#  [41] fpc_2.1-11.1             DelayedMatrixStats_1.4.0 xfun_0.4                 stringr_1.4.0            rngtools_1.3.1          
+#  [46] dendextend_1.9.0         DEoptimR_1.0-8           zlibbioc_1.28.0          zoo_1.8-4                scales_1.0.0            
+#  [51] BiocInstaller_1.32.1     rhdf5_2.26.2             yaml_2.2.0               memoise_1.1.0            gridExtra_2.3           
+#  [56] KMsurv_0.1-5             pkgmaker_0.27            stringi_1.2.4            RSQLite_2.1.1            foreach_1.4.4           
+#  [61] bibtex_0.4.2             rlang_0.4.0              pkgconfig_2.0.2          prabclus_2.2-7           bitops_1.0-6            
+#  [66] evaluate_0.13            lattice_0.20-38          Rhdf5lib_1.4.2           purrr_0.3.0              bindr_0.1.1             
+#  [71] labeling_0.3             cmprsk_2.2-7             cowplot_0.9.4            bit_1.1-14               tidyselect_0.2.5        
+#  [76] plyr_1.8.4               R6_2.3.0                 generics_0.0.2           DBI_1.0.0                pillar_1.3.1            
+#  [81] whisker_0.3-2            withr_2.1.2              RCurl_1.95-4.11          nnet_7.3-12              tsne_0.1-3              
+#  [86] tibble_2.0.1             crayon_1.3.4             survMisc_0.5.5           rmarkdown_1.11           locfit_1.5-9.1          
+#  [91] grid_3.5.2               data.table_1.12.0        blob_1.1.1               digest_0.6.18            diptest_0.75-7          
+#  [96] xtable_1.8-3             tidyr_0.8.2              gridGraphics_0.3-0       munsell_0.5.0            ggplotify_0.0.3         
+# [101] beeswarm_0.2.3           registry_0.5             vipor_0.4.5             
+```
