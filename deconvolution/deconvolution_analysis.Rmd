@@ -252,7 +252,7 @@ svr_fit_new <- cibersort_my(sig_matrix = sig_matrix_new, exprs_unlogged = exprs_
 eset$EMT <- svr_fit_new[,"EMT"]
 head(svr_fit_new)
 
-# write.csv(eset,"../../scFT-paper_rds/20191125TCGA_deconvolutionResults.csv")
+# write.csv(svr_fit_new,"../../scFT-paper_rds/20191125TCGA_deconvolutionResults.csv")
 ```
 
 
