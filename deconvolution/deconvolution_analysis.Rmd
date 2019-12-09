@@ -42,7 +42,7 @@ library(RColorBrewer)
 ## Single cell data
 
 ```{r read-single-cell-data, include = F}
-source("../../scFT-paper_hmtlReports/modified_functions20190204.R")
+source("../../scFT-paper_other/modified_functions20190204.R")
 
 # Single cell data - Fresh cells
 secretory <- readRDS("../../scFT-paper_rds/20190120Fresh_secretory_9clusters_clincluster.rds")
@@ -191,26 +191,22 @@ new_markers <- list()
 
 # new_markers$progenitor <- markers$progenitor
 out <- pca_emt(markers = markers$C3)
-# out 
 new_markers$C3 <- names(out)[abs(out) > 0.2]
 
 out <- pca_emt(markers = markers$C4)
-# out
 new_markers$C4 <- names(out)[abs(out) > 0.2]
 
 out <- pca_emt(markers = markers$EMT)
-# out
 new_markers$EMT <- names(out)[abs(out) > 0.2]
 # cor(t(log1p(exprs_tcga)[new_markers$EMT,]))
 
 out <- pca_emt(markers = markers$C10)
-# out
 new_markers$C10 <- names(out)[abs(out) > 0.2]
 
 out <- pca_emt(markers = markers$ciliated)
-# out
+
 new_markers$ciliated <- names(out)[abs(out) > 0.2]
-new_markers$ciliated <- new_markers$ciliated[c(1,2,3,8,9,10,13,14)] # remove redundant geens by cor > 0.8
+new_markers$ciliated <- new_markers$ciliated[c(1,2,3,8,9,10,13,14)] # remove redundant genes by cor > 0.8
 # str(new_markers)
 ```
 
@@ -219,6 +215,11 @@ length(unlist(new_markers))
 ```
 
 There are 52 genes in total
+
+```{r count-number-of-genes-in-each-signature}
+lapply(new_markers, length)
+```
+
 
 ## BSEQ-sc: compute the reference matrix
 
@@ -240,6 +241,13 @@ sig_matrix_new[sig_matrix_new > quantile(sig_matrix_new, 0.99)] <- quantile(sig_
 # saveRDS(fresheset, "rds/20190213fresheset.rds", compress = T)
 
 # write.csv(sig_matrix_new,"20190213_selected_signature_matrix_52genes.csv")
+```
+
+```{r}
+gc()
+rm(secretory)
+rm(fresh)
+rm(fresheset)
 ```
 
 
@@ -574,8 +582,7 @@ For TCGA data
 ```{r permutation-tcga}
 Perm <- 500
 prob <- 0.9
-# ncol(eset) * 0.8
-#  246.4 
+
 p_val_tcga <- c()
 
 for(itor in 1:Perm){
@@ -585,16 +592,14 @@ for(itor in 1:Perm){
 }
 
 sum(p_val_tcga <= 0.05)/500 * 100
-# [1] 95.2
 ```
 
 For the high-grade tumours in Tothill's data
 
-```{r}
+```{r permutation-aocs}
 Perm <- 500
-prob <- 0.9
-# ncol(eset) * 0.8
-#  246.4 
+prob <- 0.9 # select 90% samples each time
+
 p_val_tot <- c()
 
 for(itor in 1:Perm){
@@ -604,13 +609,12 @@ for(itor in 1:Perm){
 }
 
 sum(p_val_tot <= 0.05)/500 * 100
-# [1] 99.4
 ```
 
 
 ## CuratedOvarianCancer database
 
-```{r}
+```{r curatedovariancancer-deconvolution}
 ## read in the list of selected CuratedOvarianCancer database
 esets <- readRDS("../../scFT-paper_rds/20190213CuratedOvarianData_esets.rds")
 
@@ -780,7 +784,7 @@ esets_tumor[[itor]] <- eset_tmp
 
 ###### Genrate table 1
 
-```{r}
+```{r organise-table}
 df <- matrix(NA, nrow = 7, ncol = 6)
 colnames(df) <- c("nsamples","nevent","hazard_ratio","pvalue","lower.CI95","upper.CI95")
 df <- as.data.frame(df)
@@ -809,15 +813,14 @@ ggplot(df[which(df$nsamples > 100),], aes(y = database, x = hazard_ratio))+ geom
 # ggsave("plots_explore/20190213Hazard_ratio_CI95_CuratedOvarianData.png",width = 5, height = 6)
 ```
 
-```{r}
+```{r print-CuratedOvarianData-survival-results}
 knitr::kable(df)
 ```
 
 
 ###### Put all datasets together
 
-
-```{r}
+```{r merge-all-data}
 ## put all datasets together
 esets_tumor[[6]] <- esets_tumor[[6]][,!is.na(esets_tumor[[6]]$alt_sample_name)]
 df_all <- data.frame(database = c(rep("E.MTAB.386",ncol(esets_tumor[[1]])),
@@ -888,15 +891,15 @@ df_all$y <- Surv(df_all$years_to_death,
 
 df_all <- df_all[which(df_all$histological_type == "ser"),]
 
+# survival analysis on the merged data
 fit <- coxph(y~EMT+grade+stage, data = df_all) 
 summary(fit)
 ```
 
 ###### Overall KM plot
 
-```{r}
+```{r dichotomise-EMTgroups}
 df_all$EMT_group <- NA
-# df_all$EMT_group[df_all$EMT >= median(df_all$EMT)] <- "high"
 
 for(itor in 1:9){
    emt_tmp <- median(df_all$EMT[df_all$database == unique(df_all$database)[itor]])
@@ -907,7 +910,7 @@ for(itor in 1:9){
 table(df_all$EMT_group, df_all$database)
 ```
 
-```{r}
+```{r km-curves-merged-dataset}
 fit1 <- survfit(y~EMT_group, data = df_all)
 ggsurvplot(fit1, data = df_all, pval = F) + xlab("Years") 
 
@@ -916,7 +919,7 @@ ggsurvplot(fit1, data = df_all, pval = F) + xlab("Years")
 
 ## AOCS: Grade & ciliated cells
 
-```{r}
+```{r aocs-ciliated}
 toteset$ciliated.new <- svr_fit_tot[,"ciliated"]
 ggplot(as.data.frame(pData(toteset))[!is.na(toteset$grade),], aes(x = as.factor(grade), y = ciliated.new)) + geom_violin(scale = "width") + theme_classic() + geom_quasirandom(alpha = 0.4, width = 0.3) +
   xlab("Grades")+ ylab("Score of ciliated signature")
@@ -924,36 +927,20 @@ ggplot(as.data.frame(pData(toteset))[!is.na(toteset$grade),], aes(x = as.factor(
 # ggsave("plots/20190215AOCS_grade_ciliated.pdf", width = 4, height = 3)
 ```
 
-```{r}
-wilcox.test(toteset$ciliated.new[toteset$grade==1], toteset$ciliated.new[toteset$grade>1], alternative = "greater")
-```
-
-```{r}
-df_grade <- data.frame(grade = toteset$grade,
-                       exprs = toteset@assayData$exprs["CAPSL",])
-
-ggplot(df_grade, aes(x = as.factor(grade), y = exprs)) + geom_violin()
-
+```{r aocs-ciliated-wilcox}
+wilcox.test(toteset$ciliated.new[toteset$grade == 1], toteset$ciliated.new[toteset$grade > 1], alternative = "greater")
 ```
 
 
 ## Save data
 
-```{r}
-# saveRDS(eset, "rds/20191009_esetTCGA_afterDeconvolution.rds")
+```{r sav-tcga-data}
+# saveRDS(eset, "../../scFT-paper_rds/20191009_esetTCGA_afterDeconvolution.rds")
 ```
-
-
-## Session info
-
-```{r}
-sessionInfo()
-```
-
 
 ## Technical
 
-```{r}
+```{r sessionInfo}
 sessionInfo()
 
 # R version 3.5.2 (2018-12-20)
