@@ -258,7 +258,7 @@ This section integrated different batches
 seu_list <- list()
 
 seu_list[[1]] <- secretory[,secretory$type == "Cancer"]
-seu_list[[1]] <- seu_list[[1]][, seu_list[[1]]$secretory_subtype != "Immune (C8)" &seu_list[[1]]$secretory_subtype != "Unclassified"]
+seu_list[[1]] <- seu_list[[1]][, seu_list[[1]]$secretory_subtype != "Immune (C8)" & seu_list[[1]]$secretory_subtype != "Unclassified"]
 
 seu_list[[2]] <- secretory[,secretory$Patient2 %in% c("34350","33778","35773","33572")]
 seu_list[[3]] <- secretory[,secretory$Patient2 == "34659"]
@@ -273,7 +273,7 @@ for(itor in 1:3){
 n_dim <- 30
 ftsc.anchors <- FindIntegrationAnchors(object.list = seu_list, 
                                        dims = 1:n_dim,
-                                       k.anchor = 5) # feel free to try varying this parameter over a broad range, for example between 10 and 50
+                                       k.anchor = 5) 
 
 ftsc.integrated <- IntegrateData(anchorset = ftsc.anchors, dims = 1:n_dim)
 
@@ -306,12 +306,13 @@ cowplot::plot_grid(p1,p2)
 ftsc.integrated <- FindNeighbors(ftsc.integrated, dims = 1:n_dim, seed.use = 12345, k.param = 7)
 ftsc.integrated <- FindClusters(ftsc.integrated, resolution = 0.6)
 
-DimPlot(ftsc.integrated,label = T,reduction = "umap")
+DimPlot(ftsc.integrated, label = T, reduction = "umap")
 ```
 
 
 ```{r}
-table(ftsc.integrated$secretory_subtype[ftsc.integrated$type == "Cancer"], ftsc.integrated$seurat_clusters[ftsc.integrated$type == "Cancer"])
+table(ftsc.integrated$secretory_subtype[ftsc.integrated$type == "Cancer"], 
+      ftsc.integrated$seurat_clusters[ftsc.integrated$type == "Cancer"])
 ```
 
 
@@ -382,7 +383,8 @@ ftsc.integrated$Diff_score <- colSums(ftsc.integrated@assays$RNA@data[new_marker
 ```{r, fig.width=12, fig.height=3}
 ftsc.sceset <- as.SingleCellExperiment(ftsc.integrated)
 
-df.plot <- cbind(ftsc.sceset@reducedDims$UMAP, ftsc.sceset@colData[,c("KRT17_score", "CC_score", "EMT_score", "Diff_score", "type", "secretory_subtype_benign")])
+df.plot <- cbind(ftsc.sceset@reducedDims$UMAP, 
+                 ftsc.sceset@colData[,c("KRT17_score", "CC_score", "EMT_score", "Diff_score", "type", "secretory_subtype_benign")])
 df.plot <- as.data.frame(df.plot)
 # df.plot <- df.plot[!is.na(df.plot$secretory_subtype_benign),]
 df.plot1 <- df.plot[df.plot$type == "Benign",]
@@ -442,57 +444,6 @@ cowplot::plot_grid(plotlist = plist, ncol = 4)
 
 
 ```{r}
-KRT17_markers <- FindConservedMarkers(ftsc.integrated, ident.1 = 2, grouping.var = "type", verbose = FALSE)
-head(KRT17_markers, n = 15)
-```
-
-```{r}
-Diff_markers <- FindConservedMarkers(ftsc.integrated, ident.1 = 3, grouping.var = "type", verbose = FALSE)
-head(Diff_markers, n = 15)
-```
-
-
-
-```{r}
-EMT_markers <- FindConservedMarkers(ftsc.integrated, ident.1 = 7, grouping.var = "type", verbose = FALSE)
-head(EMT_markers, n = 15)
-```
-
-```{r}
-cc_markers <- FindConservedMarkers(ftsc.integrated, ident.1 = 8, grouping.var = "type", verbose = FALSE)
-head(cc_markers, n = 15)
-```
-
-
-```{r}
-C9_markers <- FindConservedMarkers(ftsc.integrated, ident.1 = 9, grouping.var = "type", verbose = FALSE)
-head(C9_markers, n = 15)
-```
-
-```{r, fig.width=10, fig.height=6}
-plots <- VlnPlot(ftsc.integrated, features = c("STMN1","CDC45","TK1","MCM4","PIGR","KRT17"),split.by = "type", pt.size = 0.3, combine = FALSE, assay = "RNA", log = T, )
-CombinePlots(plots = plots, ncol = 2)
-```
-
-
-```{r, fig.height=12, fig.width=5}
-FeaturePlot(ftsc.integrated, features = c("CPM","PGR","LGR5","TFF3","ADAMTSL1"), split.by = "type", max.cutoff = 5,min.cutoff = 0.5, cols = c("grey", "red"), pt.size = 0.2)
-```
-
-
-
-```{r, fig.width=12, fig.height=6}
-new$secretory_subtype_predicted <- ftsc.integrated$secretory_subtype[match(colnames(new), colnames(ftsc.integrated))]
-
-
-plots <- VlnPlot(new, features = c("FOS","JUN"),group.by = "secretory_subtype_predicted",  pt.size = 0.3, combine = FALSE, assay = "RNA", log = T)
-CombinePlots(plots = plots, ncol = 2)
-```
-
-Integration gave pretty visualisatin. However, when checking the marker genes, the integrated populations did not have identicall markers.
-
-
-```{r}
 # p1 <- DimPlot(secretory.integrated, reduction = "umap", label = T)
 # p2 <- DimPlot(secretory.integrated, reduction = "umap", group.by = "disease")
 # p3 <- DimPlot(secretory.integrated[,!is.na(secretory.integrated$secretory_subtype)], reduction = "umap", group.by = "secretory_subtype",cols = my_colours[c(1:5,7,9)])
@@ -519,59 +470,6 @@ $ciliated
 [1] "TEKT1"    "TUBA4B"   "C20orf85" "CAPSL"    "LRRC46"   "EFCAB1"   "C6orf118" "CCDC78"  
 
 
-
-
-## Stromal cells
-
-```{r}
-stroma <- seurat[,seurat$seurat_clusters %in% c(7, 13)]
-
-stroma <- NormalizeData(stroma)
-stroma <- ScaleData(object = stroma)
-stroma <- FindVariableFeatures(stroma, selection.method = "vst", nfeatures = 2000)
-stroma <- RunPCA(stroma)
-ElbowPlot(stroma,40)
-stroma <- RunUMAP(stroma, dims = 1:12)
-stroma <- RunTSNE(stroma, dims = 1:12)
-
-stroma <- FindNeighbors(stroma, dims = 1:12)
-stroma <- FindClusters(stroma, resolution = 0.9)
-
-p1 <- DimPlot(stroma, reduction = "umap", label = T)
-p2 <- DimPlot(stroma, reduction = "tsne", label = T)
-p3 <- DimPlot(stroma, reduction = "umap", group.by = "FACS")
-cowplot::plot_grid(p1,p2, p3)
-
-```
-
-```{r}
-table(stroma$secretory_subtype, stroma$seurat_clusters)
-```
-
-
-```{r}
-FeaturePlot(stroma, features = c("EPCAM", "KRT7","SPARC", "COL1A1", "DCN"), reduction = "umap", ncol=3)
-```
-
-```{r}
-stroma.markers <- FindAllMarkers(stroma, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
-stroma.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_logFC)
-```
-
-```{r}
-seurat$stroma_seruat_clusters <- stroma$seurat_clusters[match(colnames(seurat), colnames(stroma))]
-```
-
-```{r}
-DimPlot(seurat, reduction = "tsne", group.by = "stroma_seruat_clusters")
-```
-
-
-```{r}
-p1 <- FeaturePlot(stroma, features = c("KRT17"), reduction = "tsne", pt.size = 0.5)
-p2 <- FeaturePlot(seurat, features = c("KRT17"),reduction = "tsne" , pt.size = 0.3)
-cowplot::plot_grid(p1,p2)
-```
 
 ## Technical
 
