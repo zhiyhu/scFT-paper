@@ -1,0 +1,636 @@
+---
+title: "Data integration"
+author: "Zhiyuan Hu"
+date: "07/01/2020"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+suppressPackageStartupMessages(library(SingleCellExperiment)) #1.4.1
+suppressPackageStartupMessages(library(scater)) #1.10.1
+suppressPackageStartupMessages(library(edgeR)) #3.24.3
+suppressPackageStartupMessages(library(limma)) #3.38.3
+suppressPackageStartupMessages(library(dplyr)) #0.7.8
+# devtools::install_version(package = 'Seurat', version = package_version('3.0.2'))
+library(Seurat)#3.0.2
+library(scales) # 1.0.0
+library(reshape2) #1.4.3
+# devtools::install_github('chris-mcginnis-ucsf/DoubletFinder')
+library(DoubletFinder) #2.0.1
+set.seed(16475)
+# library(reticulate)
+# py_install("umap-learn")
+```
+
+
+
+```{r read data, include=FALSE}
+sceset <- readRDS("../../man_analysis2_20180629/rds/20190214_allFT_Clincluster_12clusters_sceset_withUMAP.rds")
+sceset <- calculateQCMetrics(sceset)
+sc16 <- readRDS("../../20190216scRNA-seq16/clean_data/sceset_sc16.rds")
+sc16 <- calculateQCMetrics(sc16)
+scb1 <- readRDS("../../20190825scRNA-seq_benign/clean_data/sceset_allBenign.rds")
+scb1 <- calculateQCMetrics(scb1)
+
+counts <- cbind(counts(sceset), counts(sc16)[match(rownames(sceset), rownames(sc16)),] ,counts(scb1)[match(rownames(sceset), rownames(scb1)),])
+coldata_scb1 <- colData(scb1)
+coldata_scb1$source <- "Fresh"
+coldata_scb1$final.clusters <- NA
+coldata_sceset <- colData(sceset)
+coldata_sceset$FACS <- "FTE"
+coldata_sc16 <- colData(sc16)
+coldata_sc16$source <- "Fresh"
+coldata_sc16$final.clusters <- NA
+coldata_sceset <- coldata_sceset[, colnames(coldata_sceset) %in% colnames(coldata_scb1)]
+coldata_sc16 <- coldata_sc16[, colnames(coldata_sc16) %in% colnames(coldata_sceset)]
+
+colnames(coldata_sceset)[!colnames(coldata_sceset) %in% colnames(coldata_sc16)]
+
+coldata <- rbind(coldata_sceset, coldata_sc16[match(colnames(coldata_sceset), colnames(coldata_sc16))], coldata_scb1[match(colnames(coldata_sceset), colnames(coldata_scb1))])
+
+rowdata <- rowData(sceset)
+
+sceset <- SingleCellExperiment(assays=list(counts = counts))
+rowData(sceset) <- rowdata
+colData(sceset) <- coldata
+rm(rowdata)
+logcounts(sceset) <- log2(calculateCPM(sceset) + 1)
+
+sceset$type <- "Cancer"
+sceset$type[grep(x = sceset$batch, pattern = "scb")] <- "Benign"
+rm(scb1)
+rm(sc16)
+sceset <- sceset[,sceset$source == "Fresh"]
+
+sceset$FACS[sceset$FACS == "CD45-EPCAM+"] <- "FTE"
+sceset$FACS[sceset$FACS == "EPCAM+CD45-"] <- "FTE"
+sceset$FACS[sceset$FACS == "CD45-EPCAM-"] <- "STROMAL"
+sceset$FACS <- toupper(sceset$FACS)
+
+# UMAP
+# too very long time to run
+set.seed(16475)
+sceset <- runUMAP(sceset, ncomponents = 2, 
+  exprs_values = "logcounts", scale_features = TRUE)
+
+set.seed(16475)
+sceset <- runTSNE(sceset, ncomponents = 2, 
+  exprs_values = "logcounts", scale_features = TRUE)
+
+rm(coldata, coldata_sc16, coldata_scb1, coldata_sceset, counts)
+gc()
+```
+
+
+```{r add secretory annotations, include=T}
+## Add secretory annotations
+secretory <- readRDS("../../man_analysis2_20180629/rds/20190120Fresh_secretory_9clusters_clincluster.rds")
+
+secretory$cell_type[secretory$clincluster_final == "C10"] <- "Cell cycle (C9)"
+secretory$cell_type[secretory$clincluster_final == "C3"] <- "Differentiated (C3)"
+secretory$cell_type[secretory$clincluster_final == "C4"] <- "KRT17 (C4)"
+secretory$cell_type[secretory$clincluster_final == "C6"] <- "Stress (C6)"
+secretory$cell_type[secretory$clincluster_final == "C8"] <- "EMT (C7)"
+secretory$cell_type[secretory$clincluster_final == "C9"] <- "Immune (C8)"
+secretory$cell_type[secretory$clincluster_fina %in% c("C1","C2","C5")] <- "Queiscent"
+secretory$secretory_subtype <- secretory$cell_type
+cancer_secretory <- secretory
+```
+
+
+```{r doubletFinder, include=FALSE, message=FALSE, eval=FALSE}
+sceset$secretory_subtype <- secretory$cell_type[match(colnames(sceset), colnames(secretory))]
+
+seurat <- as.Seurat(sceset)
+seurat <- NormalizeData(seurat)
+seurat <- ScaleData(object = seurat)
+seurat <- FindVariableFeatures(seurat, selection.method = "vst", nfeatures = 2000)
+seurat <- RunPCA(seurat)
+seurat <- RunUMAP(seurat, dims = 1:15, seed.use = 12345 )
+seurat <- RunTSNE(seurat, dims = 1:15, seed.use = 12345 )
+
+seurat <- FindNeighbors(seurat, dims = 1:15)
+seurat <- FindClusters(seurat, resolution = 0.6)
+# DimPlot(seurat, reduction = "tsne", label = T)
+
+seurat$disease <- NA
+seurat$disease[seurat$Patient2 %in% c(11543, 11545, 11553)] <- "ovarian"
+seurat$disease[seurat$Patient2 %in% c(15066, 15091, 15072)] <- "endometrial"
+seurat$disease[seurat$Patient2 %in% c(33572, 33778, 34350, 34659,35773 )] <- "benign"
+
+sweep.res.list_kidney <- paramSweep_v3(seurat, PCs = 1:15, sct = FALSE)
+sweep.stats_kidney <- summarizeSweep(sweep.res.list_kidney, GT = FALSE)
+bcmvn_kidney <- find.pK(sweep.stats_kidney)
+
+## Homotypic Doublet Proportion Estimate 
+annotations <- seurat$seurat_clusters ## Clustering results
+homotypic.prop <- modelHomotypic(annotations)           ## ex: annotations <- seu_kidney@meta.data$ClusteringResults
+nExp_poi <- round(0.01*length(seurat@active.ident))  ## 1% doublet rate
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop)) ## 
+
+## Run DoubletFinder with varying classification stringencies
+seurat <- doubletFinder_v3(seurat, PCs = 1:10, pN = 0.25, pK = 0.005, nExp = nExp_poi, reuse.pANN = FALSE)
+seurat <- doubletFinder_v3(seurat, PCs = 1:10, pN = 0.25, pK = 0.005, nExp = nExp_poi.adj, reuse.pANN = "pANN_0.25_0.005_43")
+
+seurat@meta.data$DF_hi.lo <- seurat@meta.data$DF.classifications_0.25_0.005_43
+seurat@meta.data$DF_hi.lo[which(seurat@meta.data$DF_hi.lo == "Doublet" & seurat@meta.data$DF.classifications_0.25_0.005_36 == "Singlet")] <- "Doublet_lo"
+seurat@meta.data$DF_hi.lo[which(seurat@meta.data$DF_hi.lo == "Doublet")] <- "Doublet_hi"
+
+# DimPlot(seurat, reduction = "tsne", group.by="DF_hi.lo", plot.order=c("Doublet_hi","Doublet_lo","Singlet"), colors.use=c("black","gold","red"))
+
+colData(sceset)$DF_hi.lo <- seurat$DF_hi.lo
+# all(colnames(seurat)==colnames(sceset))
+
+benign_ft <- seurat[,seurat$DF_hi.lo == "Singlet" & seurat$type=="Benign"]
+# saveRDS(benign_ft, "rds/20191030benignFT_1857cells_SeuratObj.rds")
+
+```
+
+```{r read-rds}
+## read in preprocessed data
+benign_ft <- readRDS("../../scFT-paper_rds/20191030benignFT_1857cells_SeuratObj.rds")
+```
+
+```{r umap-by-patients, fig.height=4, fig.width=10}
+p1 <-  DimPlot(benign_ft, reduction = "TSNE", group.by = "Patient2", pt = 0.4) + 
+    ggtitle(paste("t-SNE plot \n Benign FT (n = ", ncol(benign_ft), ")", sep = ""))
+p2 <- DimPlot(benign_ft, reduction = "UMAP", group.by = "Patient2", pt = 0.4) + 
+    ggtitle(paste("UMAP plot \n Benign FT (n = ", ncol(benign_ft), ")", sep = ""))
+
+cowplot::plot_grid(p1,p2)
+# ggsave("../revision_plots/SI/FigS3_benignFT_UMAPtSNE_colByPatient.png", width = 10, height = 4)
+```
+
+
+```{r, fig.height=6, fig.width=12}
+FeaturePlot(benign_ft, reduction = "UMAP",features = c("PTPRC","COL1A1","EPCAM","KRT7","PAX8","CAPS"), ncol  = 3, pt.size = 0.4)
+# ggsave("../revision_plots/SI/FigS3_benignFT_UMAPcolourByMarkers.png", width = 14, height = 8)
+```
+
+```{r}
+DimPlot(benign_ft, reduction = "UMAP",  pt = 0.4, label = T) 
+```
+
+
+## Filter out non-secretory cells
+
+```{r}
+table(seurat$seurat_clusters[seurat$type == "Benign" & seurat$DF_hi.lo == "Singlet"])
+#  0   1   2   3   4   5   6   7   8   9  10  11  12 
+# 198 922   9 509  38   1  33   6  79  19  40   0   3 
+```
+
+
+```{r filter-stroma-lymphocytes-cilitaed}
+# sum(benign_ft$seurat_clusters %in% c(8,10:12) | benign_ft$FACS == "CD45+EPCAM-") # 122 leukocytes
+secretory <- benign_ft[,!benign_ft$seurat_clusters %in% c(8,10:12) & benign_ft$FACS != "CD45+EPCAM-"] # remove CD45+ cells
+
+# sum(secretory$FACS == "STROMAL") # 11 stroma cells
+secretory <- secretory[, !secretory$FACS %in% c( "STROMAL")]
+
+dim(secretory)
+```
+
+1724 FTE cells in total
+
+```{r Filter by expression}
+# sum(secretory$seurat_clusters[secretory$type== "Benign"] %in% c(3, 7)) # 515 ciliated cells
+secretory <- secretory[, !secretory$seurat_clusters %in% c(3, 7)] # remove cilicated cells
+# 
+
+cpm <- log2(calculateCPM(secretory@assays$RNA@counts) + 1)
+secretory <- secretory[, (cpm["KRT7",] > 0.5 | cpm["PAX8",] > 0.5) &
+                         cpm["EPCAM",] > 0.5  &
+                           cpm["PTPRC",] == 0 #&
+                           # cpm["CCDC17",] < 1
+                       ]
+rm(cpm)
+table(secretory$Patient2)
+# 33572 33778 34350 34659 35773 
+#   210    53   130   356    16 
+secretory_new <- secretory
+# saveRDS(secretory, "rds/20191030benign_765secretory_seuratObj.rds")
+```
+
+
+```{r}
+cancer_secretory <- as.Seurat(cancer_secretory)
+cancer_secretory$type <- "Cancer"
+secretory <- merge(secretory_new, cancer_secretory)
+
+secretory$secretory_subtype[is.na(secretory$secretory_subtype) & secretory$type == "Cancer"] <- "Unclassified"
+
+# saveRDS(secretory, "rds/seurat_secretory_merged20191007.rds")
+```
+
+## Merged data (unintegrated)
+
+```{r}
+secretory <- NormalizeData(secretory)
+secretory <- ScaleData(object = secretory)
+secretory <- FindVariableFeatures(secretory, selection.method = "vst", nfeatures = 2000)
+secretory <- RunPCA(secretory)
+ElbowPlot(secretory, 40)
+
+secretory <- RunUMAP(secretory, dims = 1:14, seed.use = 123345)
+secretory <- RunTSNE(secretory, dims = 1:14, seed.use = 123345)
+
+secretory <- FindNeighbors(secretory, dims = 1:14, seed.use = 123345)
+secretory <- FindClusters(secretory, resolution = 0.6)
+```
+
+Batch effects existed between the two batches.
+
+```{r umaps-show-batch-effects,fig.height=3, fig.width=8}
+p1 <- DimPlot(secretory, reduction = "umap", label = T)
+p2 <- DimPlot(secretory, reduction = "umap", group.by = "type")
+cowplot::plot_grid(p1,p2)
+```
+
+
+## Data integration (standard workflow)
+
+This section integrated different batches
+
+```{r data-integration-seurat, fig.width=8, fig.height=3}
+seu_list <- list()
+
+seu_list[[1]] <- secretory[,secretory$type == "Cancer"]
+seu_list[[1]] <- seu_list[[1]][, seu_list[[1]]$secretory_subtype != "Immune (C8)" &seu_list[[1]]$secretory_subtype != "Unclassified"]
+
+seu_list[[2]] <- secretory[,secretory$Patient2 %in% c("34350","33778","35773","33572")]
+seu_list[[3]] <- secretory[,secretory$Patient2 == "34659"]
+
+for(itor in 1:3){
+    seu_list[[itor]] <- NormalizeData(seu_list[[itor]], verbose = FALSE)
+    seu_list[[itor]] <- FindVariableFeatures(seu_list[[itor]], 
+                                             selection.method = "vst", 
+                                             nfeatures = 1000, verbose = FALSE)
+}
+
+n_dim <- 30
+ftsc.anchors <- FindIntegrationAnchors(object.list = seu_list, 
+                                       dims = 1:n_dim,
+                                       k.anchor = 5) # feel free to try varying this parameter over a broad range, for example between 10 and 50
+
+ftsc.integrated <- IntegrateData(anchorset = ftsc.anchors, dims = 1:n_dim)
+
+DefaultAssay(ftsc.integrated) <- "integrated"
+
+# Run the standard workflow for visualization and clustering
+ftsc.integrated <- ScaleData(ftsc.integrated, verbose = FALSE)
+ftsc.integrated <- RunPCA(ftsc.integrated, npcs = n_dim, verbose = FALSE)
+ftsc.integrated <- RunUMAP(ftsc.integrated, reduction = "pca", dims = 1:n_dim)
+p1 <- DimPlot(ftsc.integrated, reduction = "umap", group.by = "type", pt.size = 0.5)
+p2 <- DimPlot(ftsc.integrated, 
+              reduction = "umap", 
+              group.by = "secretory_subtype", pt.size = 0.5)
+cowplot::plot_grid(p1,p2, rel_widths = c(1,1.1))
+```
+
+
+
+```{r, fig.height=3, fig.width=8}
+p1 <- DimPlot(ftsc.integrated[,ftsc.integrated$type == "Cancer" & !is.na(ftsc.integrated$secretory_subtype)], reduction = "umap", group.by = "secretory_subtype") + ggtitle("Cancer")
+p2 <- DimPlot(ftsc.integrated[,ftsc.integrated$type == "Benign"],group.by = "type",reduction = "umap") + ggtitle("Benign")
+cowplot::plot_grid(p1,p2)
+```
+
+
+#### Clustering
+
+
+```{r}
+ftsc.integrated <- FindNeighbors(ftsc.integrated, dims = 1:n_dim, seed.use = 12345, k.param = 7)
+ftsc.integrated <- FindClusters(ftsc.integrated, resolution = 0.6)
+
+DimPlot(ftsc.integrated,label = T,reduction = "umap")
+```
+
+
+```{r}
+table(ftsc.integrated$secretory_subtype[ftsc.integrated$type == "Cancer"], ftsc.integrated$seurat_clusters[ftsc.integrated$type == "Cancer"])
+```
+
+
+```{r}
+table(ftsc.integrated$type, ftsc.integrated$seurat_clusters)
+```
+
+```{r}
+ftsc.integrated$secretory_subtype_benign <- NA
+ftsc.integrated$secretory_subtype_benign[ftsc.integrated$type == "Benign" & ftsc.integrated$seurat_clusters %in% c(4)] <- "KRT17"
+
+ftsc.integrated$secretory_subtype_benign[ftsc.integrated$type == "Benign" & ftsc.integrated$seurat_clusters %in% c(10)] <- "Cell cycle"
+
+ftsc.integrated$secretory_subtype_benign[ftsc.integrated$type == "Benign" & ftsc.integrated$seurat_clusters %in% c(9)] <- "EMT"
+
+ftsc.integrated$secretory_subtype_benign[ftsc.integrated$type == "Benign" & ftsc.integrated$seurat_clusters %in% c(4)] <- "Differentiated"
+
+
+ftsc.integrated$secretory_subtype_benign[ftsc.integrated$type == "Cancer" & ftsc.integrated$secretory_subtype == "KRT17 (C4)"] <- "KRT17"
+
+ftsc.integrated$secretory_subtype_benign[ftsc.integrated$type == "Cancer" & ftsc.integrated$secretory_subtype == "Cell cycle (C9)"] <- "Cell cycle"
+
+ftsc.integrated$secretory_subtype_benign[ftsc.integrated$type == "Cancer" & ftsc.integrated$secretory_subtype == "EMT (C7)"] <- "EMT"
+
+ftsc.integrated$secretory_subtype_benign[ftsc.integrated$type == "Cancer" & ftsc.integrated$secretory_subtype == "Differentiated (C3)"] <- "Differentiated"
+```
+
+
+```{r}
+table(ftsc.integrated$secretory_subtype_benign, ftsc.integrated$type)
+```
+
+
+```{r}
+DimPlot(ftsc.integrated, reduction = "umap", label = T, pt.size = 0.5)
+
+# ggsave("../revision_plots/SI/integrated_secretory_umap_seuratResults.png", width = 5, height = 4)
+```
+
+
+```{r, fig.width=11, fig.height=3}
+p1 <- DimPlot(ftsc.integrated[,!is.na(ftsc.integrated$secretory_subtype_benign)], reduction = "umap", label = F,group.by = "secretory_subtype_benign", pt.size = 0.5) + ggtitle("Normal FT secretory cells \n from all patients") + theme(legend.position = "none")
+p2 <- DimPlot(ftsc.integrated[,!is.na(ftsc.integrated$secretory_subtype_benign) & ftsc.integrated$type == "Cancer"], reduction = "umap", label = F, group.by = "secretory_subtype_benign", pt.size = 0.5) + ggtitle("Normal FT secretory cells \n from cancer patients")+ theme(legend.position = "none")
+p3 <- DimPlot(ftsc.integrated[,!is.na(ftsc.integrated$secretory_subtype_benign) & ftsc.integrated$type == "Benign"], reduction = "umap", label = F, group.by = "secretory_subtype_benign", pt.size = 0.5) + ggtitle("Normal FT secretory cells \n from benign patients")
+p4 <- DimPlot(ftsc.integrated[,!is.na(ftsc.integrated$secretory_subtype_benign) & ftsc.integrated$type == "Benign"], reduction = "umap", label = F, group.by = "Patient2", pt.size = 0.5) + ggtitle("Normal FT secretory cells \n from benign patients (colored by patients)")
+cowplot::plot_grid(p1,p2,p3, p4, nrow = 1, rel_widths = c(1,1,1.25,1.15))
+
+# ggsave("../revision_plots/SI/integrated_secretory_umap.png", width = 17, height = 4)
+```
+
+
+
+```{r}
+integrated.markers <- FindAllMarkers(ftsc.integrated, only.pos = T, assay = "RNA", random.seed = 12345)
+```
+
+
+#### Scoring the cells from benign samples
+
+```{r}
+new_markers <- readRDS("../R_deconvolution/rds/20190213new_markers.rds")
+ftsc.integrated$KRT17_score <- colSums(ftsc.integrated@assays$RNA@data[new_markers$C4,])
+ftsc.integrated$CC_score <- colSums(ftsc.integrated@assays$RNA@data[new_markers$C10,])
+ftsc.integrated$EMT_score <- colSums(ftsc.integrated@assays$RNA@data[new_markers$EMT,])
+ftsc.integrated$Diff_score <- colSums(ftsc.integrated@assays$RNA@data[new_markers$C3,])
+```
+
+```{r, fig.width=12, fig.height=3}
+ftsc.sceset <- as.SingleCellExperiment(ftsc.integrated)
+
+df.plot <- cbind(ftsc.sceset@reducedDims$UMAP, ftsc.sceset@colData[,c("KRT17_score", "CC_score", "EMT_score", "Diff_score", "type", "secretory_subtype_benign")])
+df.plot <- as.data.frame(df.plot)
+# df.plot <- df.plot[!is.na(df.plot$secretory_subtype_benign),]
+df.plot1 <- df.plot[df.plot$type == "Benign",]
+df.plot2 <- df.plot[df.plot$type == "Cancer",]
+
+scaleScore <- function(x, max.limit = 2.5) {
+    x <- scale(x, center = T, scale = T)
+    x[x > max.limit] <- max.limit
+    return(x)
+}
+
+df.plot1$KRT17_score <- scaleScore(df.plot1$KRT17_score)
+df.plot1$CC_score <- scaleScore(df.plot1$CC_score)
+df.plot1$Diff_score <- scaleScore(df.plot1$Diff_score)
+df.plot1$EMT_score <- scaleScore(df.plot1$EMT_score)
+
+
+df.plot2$KRT17_score <- scaleScore(df.plot2$KRT17_score)
+df.plot2$CC_score <- scaleScore(df.plot2$CC_score)
+df.plot2$Diff_score <- scaleScore(df.plot2$Diff_score)
+df.plot2$EMT_score <- scaleScore(df.plot2$EMT_score)
+
+
+plotScoreUmap <- function(dat, column){
+        ggplot(data=dat, aes_string(x="UMAP_1", y="UMAP_2", fill = column)) + 
+        geom_point(alpha = 0.5, pch = 21, col = "grey80") +
+        theme_classic2() +
+        scale_fill_gradient2(midpoint=0,
+                              low="grey90", mid="white",high="red", space ="Lab" ) +
+        theme(plot.title = element_text(size=14, face="bold", hjust = 0.5))
+}
+
+plist <- list()
+plist[[1]] <- plotScoreUmap(dat = df.plot1, column = "KRT17_score") + ggtitle("Benign (KRT17 score)")
+plist[[2]] <- plotScoreUmap(dat = df.plot1, column = "CC_score") + ggtitle("Benign (cell cycle score)")
+plist[[3]] <- plotScoreUmap(dat = df.plot1, column = "Diff_score") + ggtitle("Benign (differentiated score)")
+plist[[4]] <- plotScoreUmap(dat = df.plot1, column = "EMT_score") + ggtitle("Benign (EMT score)")
+plist[[5]] <- plotScoreUmap(dat = df.plot2, column = "KRT17_score") + ggtitle("Cancer (KRT17 score)")
+plist[[6]] <- plotScoreUmap(dat = df.plot2, column = "CC_score") + ggtitle("Cancer (cell cycle score)")
+plist[[7]] <- plotScoreUmap(dat = df.plot2, column = "Diff_score") + ggtitle("Cancer (differentiated score)")
+plist[[8]] <- plotScoreUmap(dat = df.plot2, column = "EMT_score") + ggtitle("Cancer (EMT score)")
+
+cowplot::plot_grid(plotlist = plist, ncol = 4)
+
+# ggsave("../revision_plots/SI/benign_cancer_subtype_score_plots.png", height = 8, width = 18)
+# ggsave("../revision_plots/SI/benign_cancer_subtype_score_plots.tiff", height = 8, width = 18)
+
+# ggsave("../revision_plots/SI/benign_cancer_subtype_score_plots.pdf", height = 8, width = 18)
+```
+
+
+## Save rds
+
+```{r}
+# saveRDS(ftsc.integrated, "rds/ftsc.integrated_20191013.rds")
+```
+
+
+```{r}
+KRT17_markers <- FindConservedMarkers(ftsc.integrated, ident.1 = 2, grouping.var = "type", verbose = FALSE)
+head(KRT17_markers, n = 15)
+```
+
+```{r}
+Diff_markers <- FindConservedMarkers(ftsc.integrated, ident.1 = 3, grouping.var = "type", verbose = FALSE)
+head(Diff_markers, n = 15)
+```
+
+
+
+```{r}
+EMT_markers <- FindConservedMarkers(ftsc.integrated, ident.1 = 7, grouping.var = "type", verbose = FALSE)
+head(EMT_markers, n = 15)
+```
+
+```{r}
+cc_markers <- FindConservedMarkers(ftsc.integrated, ident.1 = 8, grouping.var = "type", verbose = FALSE)
+head(cc_markers, n = 15)
+```
+
+
+```{r}
+C9_markers <- FindConservedMarkers(ftsc.integrated, ident.1 = 9, grouping.var = "type", verbose = FALSE)
+head(C9_markers, n = 15)
+```
+
+```{r, fig.width=10, fig.height=6}
+plots <- VlnPlot(ftsc.integrated, features = c("STMN1","CDC45","TK1","MCM4","PIGR","KRT17"),split.by = "type", pt.size = 0.3, combine = FALSE, assay = "RNA", log = T, )
+CombinePlots(plots = plots, ncol = 2)
+```
+
+
+```{r, fig.height=12, fig.width=5}
+FeaturePlot(ftsc.integrated, features = c("CPM","PGR","LGR5","TFF3","ADAMTSL1"), split.by = "type", max.cutoff = 5,min.cutoff = 0.5, cols = c("grey", "red"), pt.size = 0.2)
+```
+
+
+
+```{r, fig.width=12, fig.height=6}
+new$secretory_subtype_predicted <- ftsc.integrated$secretory_subtype[match(colnames(new), colnames(ftsc.integrated))]
+
+
+plots <- VlnPlot(new, features = c("FOS","JUN"),group.by = "secretory_subtype_predicted",  pt.size = 0.3, combine = FALSE, assay = "RNA", log = T)
+CombinePlots(plots = plots, ncol = 2)
+```
+
+Integration gave pretty visualisatin. However, when checking the marker genes, the integrated populations did not have identicall markers.
+
+
+```{r}
+# p1 <- DimPlot(secretory.integrated, reduction = "umap", label = T)
+# p2 <- DimPlot(secretory.integrated, reduction = "umap", group.by = "disease")
+# p3 <- DimPlot(secretory.integrated[,!is.na(secretory.integrated$secretory_subtype)], reduction = "umap", group.by = "secretory_subtype",cols = my_colours[c(1:5,7,9)])
+# 
+# cowplot::plot_grid(p1,p2,p3, nrow = 1, rel_widths = c(1,1.2,1.4))
+# ggsave("plots/20190917/umap_integrated.png", width = 18, height = 5)
+```
+
+$C3
+[1] "LTBP4"    "SLC25A25" "LAMC2"    "DHCR24"   "PLK3"     "LRG1"     "LDLR"    
+
+$C4
+ [1] "SPP1"     "IL1B"     "IL1RN"    "KRT23"    "ALDH3B2"  "SUSD2"    "DEFB1"    "HLA-DQA2" "CYP4B1"   "PIGR"    
+
+$EMT
+ [1] "SPARC"    "SERPINF1" "DCN"      "SFRP4"    "CRISPLD2" "TIMP3"    "CNN1"     "MYH11"    "MFAP4"    "ENG"      "EFEMP1"  
+[12] "RGS16"   
+
+$C10
+ [1] "FEN1"   "NUSAP1" "UBE2C"  "ZWINT"  "PRC1"   "ASF1B"  "MCM4"   "GINS2"  "CENPM"  "MCM2"   "TK1"    "MCM6"   "SMC4"  
+[14] "MLF1IP" "MAD2L1"
+
+$ciliated
+[1] "TEKT1"    "TUBA4B"   "C20orf85" "CAPSL"    "LRRC46"   "EFCAB1"   "C6orf118" "CCDC78"  
+
+
+
+
+## Stromal cells
+
+```{r}
+stroma <- seurat[,seurat$seurat_clusters %in% c(7, 13)]
+
+stroma <- NormalizeData(stroma)
+stroma <- ScaleData(object = stroma)
+stroma <- FindVariableFeatures(stroma, selection.method = "vst", nfeatures = 2000)
+stroma <- RunPCA(stroma)
+ElbowPlot(stroma,40)
+stroma <- RunUMAP(stroma, dims = 1:12)
+stroma <- RunTSNE(stroma, dims = 1:12)
+
+stroma <- FindNeighbors(stroma, dims = 1:12)
+stroma <- FindClusters(stroma, resolution = 0.9)
+
+p1 <- DimPlot(stroma, reduction = "umap", label = T)
+p2 <- DimPlot(stroma, reduction = "tsne", label = T)
+p3 <- DimPlot(stroma, reduction = "umap", group.by = "FACS")
+cowplot::plot_grid(p1,p2, p3)
+
+```
+
+```{r}
+table(stroma$secretory_subtype, stroma$seurat_clusters)
+```
+
+
+```{r}
+FeaturePlot(stroma, features = c("EPCAM", "KRT7","SPARC", "COL1A1", "DCN"), reduction = "umap", ncol=3)
+```
+
+```{r}
+stroma.markers <- FindAllMarkers(stroma, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+stroma.markers %>% group_by(cluster) %>% top_n(n = 2, wt = avg_logFC)
+```
+
+```{r}
+seurat$stroma_seruat_clusters <- stroma$seurat_clusters[match(colnames(seurat), colnames(stroma))]
+```
+
+```{r}
+DimPlot(seurat, reduction = "tsne", group.by = "stroma_seruat_clusters")
+```
+
+
+```{r}
+p1 <- FeaturePlot(stroma, features = c("KRT17"), reduction = "tsne", pt.size = 0.5)
+p2 <- FeaturePlot(seurat, features = c("KRT17"),reduction = "tsne" , pt.size = 0.3)
+cowplot::plot_grid(p1,p2)
+```
+
+## Technical
+
+```{r}
+sessionInfo()
+```
+
+R version 3.5.2 (2018-12-20)
+Platform: x86_64-apple-darwin15.6.0 (64-bit)
+Running under: macOS Mojave 10.14.4
+
+Matrix products: default
+BLAS: /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBLAS.dylib
+LAPACK: /Library/Frameworks/R.framework/Versions/3.5/Resources/lib/libRlapack.dylib
+
+locale:
+[1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+
+attached base packages:
+[1] parallel  stats4    stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] class_7.3-15                DoubletFinder_2.0.1         reshape2_1.4.3              scales_1.0.0               
+ [5] Seurat_3.0.2                dplyr_0.7.8                 edgeR_3.24.3                limma_3.38.3               
+ [9] scater_1.10.1               ggplot2_3.2.0.9000          SingleCellExperiment_1.4.1  SummarizedExperiment_1.12.0
+[13] DelayedArray_0.8.0          BiocParallel_1.16.5         matrixStats_0.54.0          Biobase_2.42.0             
+[17] GenomicRanges_1.34.0        GenomeInfoDb_1.18.1         IRanges_2.16.0              S4Vectors_0.20.1           
+[21] BiocGenerics_0.28.0        
+
+loaded via a namespace (and not attached):
+  [1] backports_1.1.3          plyr_1.8.4               igraph_1.2.3             lazyeval_0.2.1          
+  [5] splines_3.5.2            listenv_0.7.0            usethis_1.4.0            digest_0.6.18           
+  [9] htmltools_0.3.6          viridis_0.5.1            gdata_2.18.0             magrittr_1.5            
+ [13] memoise_1.1.0            cluster_2.0.7-1          ROCR_1.0-7               remotes_2.0.2           
+ [17] globals_0.12.4           RcppParallel_4.4.3       R.utils_2.7.0            prettyunits_1.0.2       
+ [21] colorspace_1.4-0         ggrepel_0.8.0            xfun_0.4                 callr_3.1.1             
+ [25] crayon_1.3.4             RCurl_1.95-4.11          jsonlite_1.6             bindr_0.1.1             
+ [29] survival_2.43-3          zoo_1.8-4                ape_5.2                  glue_1.3.0              
+ [33] gtable_0.2.0             zlibbioc_1.28.0          XVector_0.22.0           leiden_0.3.1            
+ [37] pkgbuild_1.0.2           Rhdf5lib_1.4.2           future.apply_1.3.0       HDF5Array_1.10.1        
+ [41] bibtex_0.4.2             Rcpp_1.0.0               metap_1.1                viridisLite_0.3.0       
+ [45] reticulate_1.10          rsvd_1.0.2               SDMTools_1.1-221         tsne_0.1-3              
+ [49] htmlwidgets_1.3          httr_1.4.0               gplots_3.0.1.1           RColorBrewer_1.1-2      
+ [53] ica_1.0-2                pkgconfig_2.0.2          R.methodsS3_1.7.1        uwot_0.1.3              
+ [57] locfit_1.5-9.1           tidyselect_0.2.5         labeling_0.3             rlang_0.4.0             
+ [61] munsell_0.5.0            tools_3.5.2              cli_1.0.1                devtools_2.0.1          
+ [65] ggridges_0.5.1           stringr_1.4.0            yaml_2.2.0               npsurv_0.4-0            
+ [69] fs_1.2.6                 processx_3.2.1           knitr_1.21               fitdistrplus_1.0-14     
+ [73] caTools_1.17.1.1         purrr_0.3.0              RANN_2.6.1               bindrcpp_0.2.2          
+ [77] pbapply_1.4-0            future_1.14.0            nlme_3.1-137             R.oo_1.22.0             
+ [81] compiler_3.5.2           rstudioapi_0.9.0         curl_3.3                 beeswarm_0.2.3          
+ [85] plotly_4.8.0             png_0.1-7                lsei_1.2-0               tibble_2.0.1            
+ [89] stringi_1.2.4            ps_1.3.0                 desc_1.2.0               RSpectra_0.13-1         
+ [93] lattice_0.20-38          Matrix_1.2-15            pillar_1.3.1             Rdpack_0.10-1           
+ [97] lmtest_0.9-36            RcppAnnoy_0.0.11         data.table_1.12.0        cowplot_0.9.4           
+[101] bitops_1.0-6             irlba_2.3.3              gbRd_0.4-11              R6_2.3.0                
+[105] KernSmooth_2.23-15       gridExtra_2.3            vipor_0.4.5              sessioninfo_1.1.1       
+[109] codetools_0.2-16         MASS_7.3-51.1            gtools_3.8.1             assertthat_0.2.0        
+[113] pkgload_1.0.2            rhdf5_2.26.2             rprojroot_1.3-2          withr_2.1.2             
+[117] sctransform_0.2.0        GenomeInfoDbData_1.2.0   grid_3.5.2               tidyr_0.8.2             
+[121] DelayedMatrixStats_1.4.0 Rtsne_0.15               ggbeeswarm_
+
