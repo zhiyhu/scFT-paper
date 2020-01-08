@@ -26,61 +26,67 @@ set.seed(16475)
 
 
 
-```{r read data, include=FALSE}
-sceset <- readRDS("../../man_analysis2_20180629/rds/20190214_allFT_Clincluster_12clusters_sceset_withUMAP.rds")
-sceset <- calculateQCMetrics(sceset)
-sc16 <- readRDS("../../20190216scRNA-seq16/clean_data/sceset_sc16.rds")
-sc16 <- calculateQCMetrics(sc16)
-scb1 <- readRDS("../../20190825scRNA-seq_benign/clean_data/sceset_allBenign.rds")
-scb1 <- calculateQCMetrics(scb1)
+```{r read data,eval=FALSE, include=FALSE}
+# sceset <- readRDS("../../man_analysis2_20180629/rds/20190214_allFT_Clincluster_12clusters_sceset_withUMAP.rds")
+# sceset <- calculateQCMetrics(sceset)
+# sc16 <- readRDS("../../20190216scRNA-seq16/clean_data/sceset_sc16.rds")
+# sc16 <- calculateQCMetrics(sc16)
+# scb1 <- readRDS("../../20190825scRNA-seq_benign/clean_data/sceset_allBenign.rds")
+# scb1 <- calculateQCMetrics(scb1)
+# 
+# counts <- cbind(counts(sceset), counts(sc16)[match(rownames(sceset), rownames(sc16)),] ,counts(scb1)[match(rownames(sceset), rownames(scb1)),])
+# coldata_scb1 <- colData(scb1)
+# coldata_scb1$source <- "Fresh"
+# coldata_scb1$final.clusters <- NA
+# coldata_sceset <- colData(sceset)
+# coldata_sceset$FACS <- "FTE"
+# coldata_sc16 <- colData(sc16)
+# coldata_sc16$source <- "Fresh"
+# coldata_sc16$final.clusters <- NA
+# coldata_sceset <- coldata_sceset[, colnames(coldata_sceset) %in% colnames(coldata_scb1)]
+# coldata_sc16 <- coldata_sc16[, colnames(coldata_sc16) %in% colnames(coldata_sceset)]
+# 
+# colnames(coldata_sceset)[!colnames(coldata_sceset) %in% colnames(coldata_sc16)]
+# 
+# coldata <- rbind(coldata_sceset, coldata_sc16[match(colnames(coldata_sceset), colnames(coldata_sc16))], coldata_scb1[match(colnames(coldata_sceset), colnames(coldata_scb1))])
+# 
+# rowdata <- rowData(sceset)
+# 
+# sceset <- SingleCellExperiment(assays=list(counts = counts))
+# rowData(sceset) <- rowdata
+# colData(sceset) <- coldata
+# rm(rowdata)
+# logcounts(sceset) <- log2(calculateCPM(sceset) + 1)
+# 
+# sceset$type <- "Cancer"
+# sceset$type[grep(x = sceset$batch, pattern = "scb")] <- "Benign"
+# rm(scb1)
+# rm(sc16)
+# sceset <- sceset[,sceset$source == "Fresh"]
+# 
+# sceset$FACS[sceset$FACS == "CD45-EPCAM+"] <- "FTE"
+# sceset$FACS[sceset$FACS == "EPCAM+CD45-"] <- "FTE"
+# sceset$FACS[sceset$FACS == "CD45-EPCAM-"] <- "STROMAL"
+# sceset$FACS <- toupper(sceset$FACS)
+# 
+# # UMAP
+# # too very long time to run
+# set.seed(16475)
+# sceset <- runUMAP(sceset, ncomponents = 2, 
+#   exprs_values = "logcounts", scale_features = TRUE)
+# 
+# set.seed(16475)
+# sceset <- runTSNE(sceset, ncomponents = 2, 
+#   exprs_values = "logcounts", scale_features = TRUE)
+# 
+# rm(coldata, coldata_sc16, coldata_scb1, coldata_sceset, counts)
+# gc()
+# saveRDS(sceset, "../../scFT-paper_rds/20191016data_integration_all_sceset.rds")
+```
 
-counts <- cbind(counts(sceset), counts(sc16)[match(rownames(sceset), rownames(sc16)),] ,counts(scb1)[match(rownames(sceset), rownames(scb1)),])
-coldata_scb1 <- colData(scb1)
-coldata_scb1$source <- "Fresh"
-coldata_scb1$final.clusters <- NA
-coldata_sceset <- colData(sceset)
-coldata_sceset$FACS <- "FTE"
-coldata_sc16 <- colData(sc16)
-coldata_sc16$source <- "Fresh"
-coldata_sc16$final.clusters <- NA
-coldata_sceset <- coldata_sceset[, colnames(coldata_sceset) %in% colnames(coldata_scb1)]
-coldata_sc16 <- coldata_sc16[, colnames(coldata_sc16) %in% colnames(coldata_sceset)]
 
-colnames(coldata_sceset)[!colnames(coldata_sceset) %in% colnames(coldata_sc16)]
-
-coldata <- rbind(coldata_sceset, coldata_sc16[match(colnames(coldata_sceset), colnames(coldata_sc16))], coldata_scb1[match(colnames(coldata_sceset), colnames(coldata_scb1))])
-
-rowdata <- rowData(sceset)
-
-sceset <- SingleCellExperiment(assays=list(counts = counts))
-rowData(sceset) <- rowdata
-colData(sceset) <- coldata
-rm(rowdata)
-logcounts(sceset) <- log2(calculateCPM(sceset) + 1)
-
-sceset$type <- "Cancer"
-sceset$type[grep(x = sceset$batch, pattern = "scb")] <- "Benign"
-rm(scb1)
-rm(sc16)
-sceset <- sceset[,sceset$source == "Fresh"]
-
-sceset$FACS[sceset$FACS == "CD45-EPCAM+"] <- "FTE"
-sceset$FACS[sceset$FACS == "EPCAM+CD45-"] <- "FTE"
-sceset$FACS[sceset$FACS == "CD45-EPCAM-"] <- "STROMAL"
-sceset$FACS <- toupper(sceset$FACS)
-
-# UMAP
-# too very long time to run
-set.seed(16475)
-sceset <- runUMAP(sceset, ncomponents = 2, 
-  exprs_values = "logcounts", scale_features = TRUE)
-
-set.seed(16475)
-sceset <- runTSNE(sceset, ncomponents = 2, 
-  exprs_values = "logcounts", scale_features = TRUE)
-
-rm(coldata, coldata_sc16, coldata_scb1, coldata_sceset, counts)
-gc()
+```{r}
+sceset <- readRDS("../../scFT-paper_rds/20191016data_integration_all_sceset.rds")
 ```
 
 
@@ -100,7 +106,7 @@ cancer_secretory <- secretory
 ```
 
 
-```{r doubletFinder, include=FALSE, message=FALSE, eval=FALSE}
+```{r doubletFinder, message=F}
 sceset$secretory_subtype <- secretory$cell_type[match(colnames(sceset), colnames(secretory))]
 
 seurat <- as.Seurat(sceset)
@@ -143,9 +149,8 @@ seurat@meta.data$DF_hi.lo[which(seurat@meta.data$DF_hi.lo == "Doublet")] <- "Dou
 colData(sceset)$DF_hi.lo <- seurat$DF_hi.lo
 # all(colnames(seurat)==colnames(sceset))
 
-benign_ft <- seurat[,seurat$DF_hi.lo == "Singlet" & seurat$type=="Benign"]
+# benign_ft <- seurat[,seurat$DF_hi.lo == "Singlet" & seurat$type=="Benign"]
 # saveRDS(benign_ft, "rds/20191030benignFT_1857cells_SeuratObj.rds")
-
 ```
 
 ```{r read-rds}
@@ -202,8 +207,8 @@ secretory <- secretory[, !secretory$seurat_clusters %in% c(3, 7)] # remove cilic
 
 cpm <- log2(calculateCPM(secretory@assays$RNA@counts) + 1)
 secretory <- secretory[, (cpm["KRT7",] > 0.5 | cpm["PAX8",] > 0.5) &
-                         cpm["EPCAM",] > 0.5  &
-                           cpm["PTPRC",] == 0 #&
+                          cpm["EPCAM",] > 0.5  &
+                          cpm["PTPRC",] == 0 #&
                            # cpm["CCDC17",] < 1
                        ]
 rm(cpm)
@@ -373,7 +378,7 @@ integrated.markers <- FindAllMarkers(ftsc.integrated, only.pos = T, assay = "RNA
 #### Scoring the cells from benign samples
 
 ```{r}
-new_markers <- readRDS("../R_deconvolution/rds/20190213new_markers.rds")
+new_markers <- readRDS("../../scFT-paper_rds/20190213new_markers.rds")
 ftsc.integrated$KRT17_score <- colSums(ftsc.integrated@assays$RNA@data[new_markers$C4,])
 ftsc.integrated$CC_score <- colSums(ftsc.integrated@assays$RNA@data[new_markers$C10,])
 ftsc.integrated$EMT_score <- colSums(ftsc.integrated@assays$RNA@data[new_markers$EMT,])
@@ -411,7 +416,7 @@ df.plot2$EMT_score <- scaleScore(df.plot2$EMT_score)
 plotScoreUmap <- function(dat, column){
         ggplot(data=dat, aes_string(x="UMAP_1", y="UMAP_2", fill = column)) + 
         geom_point(alpha = 0.5, pch = 21, col = "grey80") +
-        theme_classic2() +
+        theme_classic() +
         scale_fill_gradient2(midpoint=0,
                               low="grey90", mid="white",high="red", space ="Lab" ) +
         theme(plot.title = element_text(size=14, face="bold", hjust = 0.5))
@@ -451,25 +456,6 @@ cowplot::plot_grid(plotlist = plist, ncol = 4)
 # cowplot::plot_grid(p1,p2,p3, nrow = 1, rel_widths = c(1,1.2,1.4))
 # ggsave("plots/20190917/umap_integrated.png", width = 18, height = 5)
 ```
-
-$C3
-[1] "LTBP4"    "SLC25A25" "LAMC2"    "DHCR24"   "PLK3"     "LRG1"     "LDLR"    
-
-$C4
- [1] "SPP1"     "IL1B"     "IL1RN"    "KRT23"    "ALDH3B2"  "SUSD2"    "DEFB1"    "HLA-DQA2" "CYP4B1"   "PIGR"    
-
-$EMT
- [1] "SPARC"    "SERPINF1" "DCN"      "SFRP4"    "CRISPLD2" "TIMP3"    "CNN1"     "MYH11"    "MFAP4"    "ENG"      "EFEMP1"  
-[12] "RGS16"   
-
-$C10
- [1] "FEN1"   "NUSAP1" "UBE2C"  "ZWINT"  "PRC1"   "ASF1B"  "MCM4"   "GINS2"  "CENPM"  "MCM2"   "TK1"    "MCM6"   "SMC4"  
-[14] "MLF1IP" "MAD2L1"
-
-$ciliated
-[1] "TEKT1"    "TUBA4B"   "C20orf85" "CAPSL"    "LRRC46"   "EFCAB1"   "C6orf118" "CCDC78"  
-
-
 
 ## Technical
 
