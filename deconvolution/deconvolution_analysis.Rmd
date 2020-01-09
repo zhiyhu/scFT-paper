@@ -2,7 +2,11 @@
 title: "Deconvolution of bulk expression data"
 author: "Zhiyuan Hu"
 date: "2019/11/25"
-output: html_document
+output: 
+    html_document:
+        toc: true
+        number_sections: true
+        theme: united
 ---
 
 ```{r setup, include=FALSE, cache=FALSE}
@@ -37,9 +41,9 @@ library(ggplot2)
 library(RColorBrewer)
 ```
 
-## Summary
+# Summary
 
-## Single cell data
+# Single cell data
 
 ```{r read-single-cell-data, include = F}
 source("../../scFT-paper_other/modified_functions20190204.R")
@@ -60,7 +64,7 @@ load("../../scFT-paper_rds/20191125background_deconvolution_scRNAseqData.rdata")
 ```
 
 
-## Select Markers
+# Select Markers
 
 We selected the representative marker genes to denote the transcriptomic signatures of the five FTE cell subtypes.
 
@@ -79,7 +83,7 @@ markers <- list(C3 = marker.C3$gene,
 ```
 
 
-#### Construct a scRNA-seq dataset for fresh FTE cells
+## Construct a scRNA-seq dataset for fresh FTE cells
 
 ```{r perpare-fresheset}
 fresheset <- ExpressionSet(assayData = as.matrix(counts(fresh)),
@@ -102,7 +106,7 @@ fresh$cell.type <- fresheset$cell.type
 ```
 
 
-## Data
+# Data
 
 The eset datasets are preprocessed by '20181028Prepare_datasets.rmd'
 
@@ -159,7 +163,7 @@ toteset$summarygrade[toteset$Grade %in% c(2,3)] <- "high"
 ```
 
 
-## Select genes by PCA in TCGA data
+# Select genes by PCA in TCGA data
 
 ```{r marker_pca_function}
 # we removed the marker genes with little dispersion in the bulk RNAseq data
@@ -221,7 +225,7 @@ lapply(new_markers, length)
 ```
 
 
-## BSEQ-sc: compute the reference matrix
+# BSEQ-sc: compute the reference matrix
 
 ```{r bseq-signature-matrix}
 sig_matrix_new <- bseq_my(markers = new_markers)
@@ -250,8 +254,9 @@ rm(fresh)
 rm(fresheset)
 ```
 
+# Deconvolution and survival analysis
 
-#### Cibersort TCGA
+## Cibersort TCGA
 
 Use the reference matrix to decompose TCGA data
 
@@ -264,7 +269,7 @@ head(svr_fit_new)
 ```
 
 
-###### Barplots
+### Barplots
 
 Barplots
 
@@ -327,7 +332,7 @@ ggplot(plot.data2) + geom_bar(aes(y = Fraction,  x = State , fill = State),stat 
 ```
 
 
-###### t-SNE plot
+### t-SNE plot
 
 ```{r TCGA-deconvolution-tSNE-plot, fig.width=12, fig.height=2.4}
 colnames(svr_fit_new)[c(1,2,4,5)] <- c("Differentiated","KRT17","Cell_cycle","Ciliated")
@@ -372,7 +377,7 @@ plot.htmp <- pheatmap::pheatmap(svr_fit_new[,1:5], cluster_cols = F, show_rownam
 
 ```
 
-#### Survival analysis
+### Survival analysis
 
 Univariate survival anlaysis gave significant p-value and hazard ratio ~ 2.3
 
@@ -391,7 +396,7 @@ summary(fit)
 ```
 
 
-#### Cibersort AOCS
+## Cibersort AOCS
 
 ```{r aocs-deconvolution-and-survival-analysis}
 svr_fit_tot <- cibersort_my(sig_matrix = sig_matrix_new, exprs_unlogged = exprs_tot)
@@ -412,7 +417,7 @@ summary(fit_tot)
 ```
 
 
-###### Barplots
+### Barplots
 
 ```{r aocs-prepare-stacked-barplots}
 svr_fit_new_diff <- svr_fit_tot[svr_fit_tot[,1] > 0.5,]
@@ -477,7 +482,7 @@ ggplot(plot.data2) + geom_bar(aes(y = Fraction,  x = State , fill = State),stat 
 ```
 
 
-#### Heatmap: TCGA & AOCS
+### Heatmap: TCGA & AOCS
 
 We plot the heatmap for the diagram
 
@@ -503,13 +508,13 @@ pheatmap::pheatmap(data.heatmap, color = colorRampPalette(brewer.pal(n = 7, name
 # dev.off()
 ```
 
-#### Cibersort OXO-PCR
+## Cibersort OXO-PCR
 
 ```{r cibersort-oxopcr}
 svr_fit_oxo <- cibersort_my(sig_matrix = sig_matrix_new, exprs_unlogged = cpm(as.matrix(oxopcr_pre)))
 ```
 
-###### Heatmap
+### Heatmap
 
 
 ```{r oxopcr_heatmap}
@@ -524,7 +529,7 @@ gheat <- ggplotify::as.ggplot(plot.htmp)
 # ggsave(gheat, filename = "plots/Fig4_OXOPCR_heatmap20190316.pdf", device = "pdf", width = 8, height = 12, units = "in")
 ```
 
-###### Stacked barplot
+### Stacked barplot
 
 ```{r oxopcr-deconvolution-stacked-barplot}
 svr_fit_new_diff <- svr_fit_oxo[svr_fit_oxo[,1] > 0.5,]
@@ -641,7 +646,7 @@ for(itor in 1:length(esets)) {
 
 
 
-###### Manually iterations
+### Manually iterations
 
 We applied survival analysis on the serous ovarian cancer cases with stage and grade as covariate.
 
@@ -782,7 +787,7 @@ esets_tumor[[itor]] <- eset_tmp
 ```
 
 
-###### Genrate table 1
+### Generate table 1
 
 ```{r organise-table}
 df <- matrix(NA, nrow = 7, ncol = 6)
@@ -818,7 +823,7 @@ knitr::kable(df)
 ```
 
 
-###### Put all datasets together
+# Put all datasets together
 
 ```{r merge-all-data}
 ## put all datasets together
@@ -896,7 +901,7 @@ fit <- coxph(y~EMT+grade+stage, data = df_all)
 summary(fit)
 ```
 
-###### Overall KM plot
+## Overall KM plot
 
 ```{r dichotomise-EMTgroups}
 df_all$EMT_group <- NA
@@ -917,7 +922,7 @@ ggsurvplot(fit1, data = df_all, pval = F) + xlab("Years")
 # ggsave("../revision_plots/main/20191009_survival_pooled_nine.png", width = 5, height = 4)
 ```
 
-## AOCS: Grade & ciliated cells
+# AOCS: Grade & ciliated cells
 
 ```{r aocs-ciliated}
 toteset$ciliated.new <- svr_fit_tot[,"ciliated"]
@@ -932,13 +937,14 @@ wilcox.test(toteset$ciliated.new[toteset$grade == 1], toteset$ciliated.new[totes
 ```
 
 
-## Save data
+# Save data
 
 ```{r sav-tcga-data}
 # saveRDS(eset, "../../scFT-paper_rds/20191009_esetTCGA_afterDeconvolution.rds")
+# write.csv(sig_matrix_new, "../../scFT-paper_rds/sig_matrix_new20200109.csv")
 ```
 
-## Technical
+# Technical
 
 ```{r sessionInfo}
 sessionInfo()
