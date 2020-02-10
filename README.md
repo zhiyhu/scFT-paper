@@ -53,5 +53,5 @@ In the last part, we used the information obtained by scRNA-seq to deconvolute T
 This repo is associated with the preprint:
 
 
-Zhiyuan Hu, Mara Artibani, Abdulkhaliq Alsaadi, ..., Tatjana Sauka-Spengler, Christopher Yau \*, Ahmed A. Ahmed \*. (2020). **The repertoire of serous ovarian cancer non-genetic heterogeneity revealed by single-cell sequencing of normal fallopian tube epithelial cells**. *Cancer Cell* Volume 37, Issue 2, p226-242. doi: https://doi.org/10.1016/j.ccell.2020.01.003
+Zhiyuan Hu, Mara Artibani, Abdulkhaliq Alsaadi, ..., Tatjana Sauka-Spengler, Christopher Yau \*, Ahmed A. Ahmed \*. (2020). **The repertoire of serous ovarian cancer non-genetic heterogeneity revealed by single-cell sequencing of normal fallopian tube epithelial cells**. *Cancer Cell*. Volume 37, Issue 2: p226-242. doi: https://doi.org/10.1016/j.ccell.2020.01.003
 
