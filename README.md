@@ -53,6 +53,5 @@ In the last part, we used the information obtained by scRNA-seq to deconvolute T
 This repo is associated with the preprint:
 
 
-Zhiyuan Hu, Mara Artibani, Abdulkhaliq Alsaadi, Nina Wietek, Matteo Morotti, Laura Santana Gonzalez, Salma El-Sahhar, Mohammad KaramiNejadRanjbar, Garry Mallett, Tingyan Shi, Kenta Masuda, Yiyan Zheng, Kay Chong, Stephen Damato, Sunanda Dhar, Riccardo Garruto Campanile, Hooman Soleymani majd, Vincenzo Cerundolo, Tatjana Sauka-Spengler, Christopher Yau \*, Ahmed A. Ahmed \*. **The repertoire of serous ovarian cancer non-genetic heterogeneity revealed by single-cell sequencing of normal fallopian tube epithelial cells**. *bioRxiv* 672626; doi: https://doi.org/10.1101/672626
+Zhiyuan Hu, Mara Artibani, Abdulkhaliq Alsaadi, ..., Tatjana Sauka-Spengler, Christopher Yau \*, Ahmed A. Ahmed \*. (2020). **The repertoire of serous ovarian cancer non-genetic heterogeneity revealed by single-cell sequencing of normal fallopian tube epithelial cells**. *Cancer Cell* Volume 37, Issue 2, p226-242. doi: https://doi.org/10.1016/j.ccell.2020.01.003
 
-**Note**: the citation information will be updated soon.
