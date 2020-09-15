@@ -57,4 +57,6 @@ In the last part, we used the information obtained by scRNA-seq to deconvolute T
 * In `deconvolution/DEanalysis_EMThigh_TCGA.Rmd` and its report `deconvolution/d DEanalysis_EMThigh_TCGA.html`, we studied the molecular characteristics of those EMT-high tumours that had worse prognosis.
 
 
+## Video
 
+A video explaining the bio finding of our work at https://youtu.be/AwKZVEtzjhs
