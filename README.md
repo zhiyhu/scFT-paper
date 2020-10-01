@@ -62,3 +62,5 @@ In the last part, we used the information obtained by scRNA-seq to deconvolute T
 ## Video
 
 A video explaining the bio finding of our work at https://youtu.be/AwKZVEtzjhs
+
+[![Watch the video](https://img.youtube.com/vi/AwKZVEtzjhs/hqdefault.jpg)](https://youtu.be/AwKZVEtzjhs)
