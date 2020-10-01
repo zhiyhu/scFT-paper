@@ -1,10 +1,10 @@
-# scFT-paper
+# Single-cell RNA-seq of human fallopian tubes
 
 ## Citation
 
 This repo is associated with the publication:
 
-Zhiyuan Hu, Mara Artibani, Abdulkhaliq Alsaadi, ..., Tatjana Sauka-Spengler, Christopher Yau \*, Ahmed A. Ahmed \*. (2020). **The repertoire of serous ovarian cancer non-genetic heterogeneity revealed by single-cell sequencing of normal fallopian tube epithelial cells**. *Cancer Cell*. Volume 37, Issue 2: p226-242. doi: https://doi.org/10.1016/j.ccell.2020.01.003
+Zhiyuan Hu, Mara Artibani, Abdulkhaliq Alsaadi, Nina Wietek, Matteo Morotti, Tingyan Shi, Zhe Zhong, Laura Santana Gonzalez, Salma El-Sahhar, Mohammad KaramiNejadRanjbar, Garry Mallett, Yun Feng, Kenta Masuda, Yiyan Zheng, Kay Chong, Stephen Damato, Sunanda Dhar, Leticia Campo, Riccardo Garruto Campanile, Vikram Rai, David Maldonado-Perez, Stephanie Jones, Vincenzo Cerundolo, Tatjana Sauka-Spengler, Christopher Yau \*, Ahmed A. Ahmed \*. (2020). **The repertoire of serous ovarian cancer non-genetic heterogeneity revealed by single-cell sequencing of normal fallopian tube epithelial cells**. *Cancer Cell*. Volume 37, Issue 2: p226-242. doi: https://doi.org/10.1016/j.ccell.2020.01.003
 
 ## Interactive visualisation and cell annotations
 
@@ -59,8 +59,11 @@ In the last part, we used the information obtained by scRNA-seq to deconvolute T
 * In `deconvolution/DEanalysis_EMThigh_TCGA.Rmd` and its report `deconvolution/d DEanalysis_EMThigh_TCGA.html`, we studied the molecular characteristics of those EMT-high tumours that had worse prognosis.
 
 
-## Video
+## Animation
 
-A video explaining the bio finding of our work at https://youtu.be/AwKZVEtzjhs
+A video explaining the biomedical finding of our work at https://youtu.be/AwKZVEtzjhs
 
 [![Watch the video](https://img.youtube.com/vi/AwKZVEtzjhs/hqdefault.jpg)](https://youtu.be/AwKZVEtzjhs)
+
+
+
