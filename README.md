@@ -6,9 +6,11 @@ This repo is associated with the publication:
 
 Zhiyuan Hu, Mara Artibani, Abdulkhaliq Alsaadi, ..., Tatjana Sauka-Spengler, Christopher Yau \*, Ahmed A. Ahmed \*. (2020). **The repertoire of serous ovarian cancer non-genetic heterogeneity revealed by single-cell sequencing of normal fallopian tube epithelial cells**. *Cancer Cell*. Volume 37, Issue 2: p226-242. doi: https://doi.org/10.1016/j.ccell.2020.01.003
 
-## Interactive visualisation of data
+## Interactive visualisation
 
 Please visit our [**Cell Browser**](https://ovariancancercell.github.io)
+
+**Notes:** The cell annotation files can also be downloaded from our Cell Browser, e.g. [here](https://ovariancancercell.github.io/sampleSecretoryCells/meta.tsv) for secretory cell annotations.
 
 ## File description
 
