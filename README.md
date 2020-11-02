@@ -6,7 +6,7 @@ This repo is associated with the publication:
 
 Zhiyuan Hu, Mara Artibani, Abdulkhaliq Alsaadi, Nina Wietek, Matteo Morotti, Tingyan Shi, Zhe Zhong, Laura Santana Gonzalez, Salma El-Sahhar, Mohammad KaramiNejadRanjbar, Garry Mallett, Yun Feng, Kenta Masuda, Yiyan Zheng, Kay Chong, Stephen Damato, Sunanda Dhar, Leticia Campo, Riccardo Garruto Campanile, Vikram Rai, David Maldonado-Perez, Stephanie Jones, Vincenzo Cerundolo, Tatjana Sauka-Spengler, Christopher Yau \*, Ahmed A. Ahmed \*. (2020). **The repertoire of serous ovarian cancer non-genetic heterogeneity revealed by single-cell sequencing of normal fallopian tube epithelial cells**. *Cancer Cell*. Volume 37, Issue 2: p226-242. doi: https://doi.org/10.1016/j.ccell.2020.01.003
 
-**Note:** please address your inquiry to the corresponding authours to make sure that it get anwsered.
+**Note: please address your inquiry to the corresponding authours to make sure that it get anwsered.**
 
 
 ## Interactive visualisation and cell annotations
