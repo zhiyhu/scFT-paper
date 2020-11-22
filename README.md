@@ -15,6 +15,10 @@ Please visit our [**Cell Browser**](https://ovariancancercell.github.io)
 
 **Notes:** The **cell annotation files** can also be downloaded from our Cell Browser, e.g. [here](https://ovariancancercell.github.io/sampleSecretoryCells/meta.tsv) for secretory cell annotations. 
 
+## Downloading of related R data
+
+All Rmd and Rdata can be downloaded from https://figshare.com/s/ed717cd5deca61308f98.
+
 ## File description
 
 * Rmd is the code file
